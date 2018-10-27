@@ -6,7 +6,7 @@ build:
   image: gitlab-registry.cern.ch/cloud/ciadm
   script:
     - yum install -y make gcc git wget
-    - export GOLANG_VERSION=1.11.1
+    - export GOLANG_VERSION=1.10.2
     - export GOLANG_ARCH=linux-amd64
     - wget https://dl.google.com/go/go${GOLANG_VERSION}.${GOLANG_ARCH}.tar.gz
     - tar -C /usr/local -xzf go${GOLANG_VERSION}.${GOLANG_ARCH}.tar.gz

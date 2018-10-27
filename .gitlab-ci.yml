@@ -1,0 +1,24 @@
+stages:
+  - build
+
+build:
+  stage: build
+  image: gitlab-registry.cern.ch/cloud/ciadm
+  script:
+    - yum install -y make gcc git wget
+    - export GOLANG_VERSION=1.11.1
+    - export GOLANG_ARCH=linux-amd64
+    - wget https://dl.google.com/go/go${GOLANG_VERSION}.${GOLANG_ARCH}.tar.gz
+    - tar -C /usr/local -xzf go${GOLANG_VERSION}.${GOLANG_ARCH}.tar.gz
+    - export PATH=/usr/local/go/bin:$PATH
+    - export GOPATH=/tmp/go-path
+    - export PATH=${GOPATH}/bin:${PATH}
+    - export AUTOSCALER_DIR=${GOPATH}/src/k8s.io/autoscaler
+    - mkdir -p ${AUTOSCALER_DIR}
+    - cp -r ./* ${AUTOSCALER_DIR}
+    - cd ${AUTOSCALER_DIR}/cluster-autoscaler
+    - make
+    - make test-unit
+    - make format
+  except:
+    - cern-master

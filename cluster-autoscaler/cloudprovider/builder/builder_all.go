@@ -25,6 +25,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/azure"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/gce"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/gke"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/openstack"
 	"k8s.io/autoscaler/cluster-autoscaler/config"
 )
 
@@ -35,6 +36,7 @@ var AvailableCloudProviders = []string{
 	gce.ProviderNameGCE,
 	gke.ProviderNameGKE,
 	alicloud.ProviderName,
+	openstack.ProviderName,
 }
 
 // DefaultCloudProvider is GCE.
@@ -52,6 +54,8 @@ func buildCloudProvider(opts config.AutoscalingOptions, do cloudprovider.NodeGro
 		return azure.BuildAzure(opts, do, rl)
 	case alicloud.ProviderName:
 		return alicloud.BuildAlicloud(opts, do, rl)
+	case openstack.ProviderName:
+		return openstack.BuildOpenstack(opts, do, rl)
 	}
 	return nil
 }

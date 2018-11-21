@@ -42,7 +42,7 @@ func (os *openstackCloudProvider) NodeGroups() []cloudprovider.NodeGroup {
 		minSize: 0,
 		maxSize: 10,
 		targetSize: 5,
-		id: "NodeGroup-01",
+		id: "Default",
 	}
 	groups = append(groups, ng)
 	return groups
@@ -55,7 +55,7 @@ func (os *openstackCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovi
 		minSize: 0,
 		maxSize: 10,
 		targetSize: 5,
-		id: "NodeGroup-01",
+		id: "Default",
 	}, nil
 }
 
@@ -99,6 +99,10 @@ type OpenstackNodeGroup struct {
 
 func (ng OpenstackNodeGroup) IncreaseSize(delta int) error {
 	glog.Infof("Increasing size by %d", delta)
+	if delta <= 0 {
+		return fmt.Errorf("size increase must be positive")
+	}
+
 	return nil
 }
 

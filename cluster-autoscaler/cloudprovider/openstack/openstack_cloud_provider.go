@@ -10,6 +10,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/config"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
 	"k8s.io/kubernetes/pkg/scheduler/cache"
+	"os"
 )
 
 const (
@@ -42,7 +43,7 @@ func (os *openstackCloudProvider) NodeGroups() []cloudprovider.NodeGroup {
 		minSize: 0,
 		maxSize: 10,
 		targetSize: 5,
-		id: "NodeGroup-01",
+		id: "Default",
 	}
 	groups = append(groups, ng)
 	return groups
@@ -55,7 +56,7 @@ func (os *openstackCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovi
 		minSize: 0,
 		maxSize: 10,
 		targetSize: 5,
-		id: "NodeGroup-01",
+		id: "Default",
 	}, nil
 }
 
@@ -78,6 +79,11 @@ func (os *openstackCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceL
 
 func (os *openstackCloudProvider) Refresh() error {
 	glog.Info("Calling Refresh()")
+	nodes, err := os.openstackManager.CurrentTotalNodes()
+	if err != nil {
+		return err
+	}
+	glog.Infof("Current nodes: %d", nodes)
 	return nil
 }
 
@@ -99,6 +105,10 @@ type OpenstackNodeGroup struct {
 
 func (ng OpenstackNodeGroup) IncreaseSize(delta int) error {
 	glog.Infof("Increasing size by %d", delta)
+	if delta <= 0 {
+		return fmt.Errorf("size increase must be positive")
+	}
+
 	return nil
 }
 
@@ -170,6 +180,16 @@ func (ng OpenstackNodeGroup) TargetSize() (int, error) {
 
 func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDiscoveryOptions, rl *cloudprovider.ResourceLimiter) cloudprovider.CloudProvider {
 	var config io.ReadCloser
+
+	// Should be loaded with --cloud-config /etc/kubernetes/kube_openstack_config in master node
+	if opts.CloudConfig != "" {
+		var err error
+		config, err = os.Open(opts.CloudConfig)
+		if err != nil {
+			glog.Fatalf("Couldn't open cloud provider configuration %s: %#v", opts.CloudConfig, err)
+		}
+		defer config.Close()
+	}
 
 	manager, err := CreateOpenstackManager(config, do)
 	if err != nil {

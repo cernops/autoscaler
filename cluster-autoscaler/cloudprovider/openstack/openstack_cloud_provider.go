@@ -79,6 +79,11 @@ func (os *openstackCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceL
 
 func (os *openstackCloudProvider) Refresh() error {
 	glog.Info("Calling Refresh()")
+	nodes, err := os.openstackManager.CurrentTotalNodes()
+	if err != nil {
+		return err
+	}
+	glog.Infof("Current nodes: %d", nodes)
 	return nil
 }
 
@@ -175,6 +180,8 @@ func (ng OpenstackNodeGroup) TargetSize() (int, error) {
 
 func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDiscoveryOptions, rl *cloudprovider.ResourceLimiter) cloudprovider.CloudProvider {
 	var config io.ReadCloser
+
+	// Should be loaded with --cloud-config /etc/kubernetes/kube_openstack_config in master node
 	if opts.CloudConfig != "" {
 		var err error
 		config, err = os.Open(opts.CloudConfig)

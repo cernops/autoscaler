@@ -5,8 +5,12 @@ import (
 	"github.com/golang/glog"
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
 	"github.com/gophercloud/gophercloud/openstack/identity/v3/extensions/trusts"
+	"sync"
+
+	//"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stackresources"
 	"gopkg.in/gcfg.v1"
 	"os"
 
@@ -17,7 +21,15 @@ import (
 
 type OpenstackManager struct {
 	clusterClient *gophercloud.ServiceClient
+	novaClient *gophercloud.ServiceClient
+	heatClient *gophercloud.ServiceClient
 	clusterName string
+
+	UpdateMutex sync.Mutex
+
+	minSize int
+	maxSize int
+	targetSize int
 
 }
 
@@ -28,52 +40,59 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 			glog.Errorf("Couldn't read config: %v", err)
 			return nil, err
 		}
-		glog.Infof("TrustID: %s", cfg.Global.TrustID)
 	}
 
-	opts := toAuthOptions(cfg)
+	opts := toAuthOptsExt(cfg)
 
 	/*opts, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
 		return nil, fmt.Errorf("Could not get env auth options: %v", err)
 	}*/
 
-	glog.Infof("%#v", opts)
-
 	//provider, err := openstack.AuthenticatedClient(opts)
 	provider, err := openstack.NewClient(cfg.Global.AuthURL)
 	if err != nil {
-		return nil, fmt.Errorf("Could not authenticate client: %v", err)
+		return nil, fmt.Errorf("could not authenticate client: %v", err)
 	}
 
 	err = openstack.AuthenticateV3(provider, opts, gophercloud.EndpointOpts{})
 	if err != nil {
-		return nil, fmt.Errorf("Bad")
+		return nil, fmt.Errorf("could not authenticate: %v", err)
 	}
 
 	clusterClient, err := openstack.NewContainerInfraV1(provider, gophercloud.EndpointOpts{Type: "container-infra", Name: "magnum", Region: "cern"})
 	if err != nil {
-		return nil, fmt.Errorf("Could not create container-infra client: %v", err)
+		return nil, fmt.Errorf("could not create container-infra client: %v", err)
+	}
+
+	novaClient, err := openstack.NewComputeV2(provider, gophercloud.EndpointOpts{Type: "compute", Name: "nova", Region: "cern"})
+	if err != nil {
+		return nil, fmt.Errorf("could not create compute client: %v", err)
+	}
+
+	heatClient, err := openstack.NewOrchestrationV1(provider, gophercloud.EndpointOpts{Type: "orchestration", Name: "heat", Region: "cern"})
+	if err != nil {
+		return nil, fmt.Errorf("could not create orchestration client: %v", err)
 	}
 
 	// Temporary, can get from CLUSTER_UUID from
 	// /etc/sysconfig/heat-params in master node.
 	clusterName := os.Getenv("CLUSTER_NAME")
 	if clusterName == "" {
-		return nil, fmt.Errorf("Please set env var CLUSTER_NAME of cluster to manage")
+		return nil, fmt.Errorf("please set env var CLUSTER_NAME of cluster to manage")
 	}
 
 	manager := OpenstackManager{
 		clusterClient: clusterClient,
 		clusterName: clusterName,
+		novaClient: novaClient,
+		heatClient: heatClient,
 	}
 
 	return &manager, nil
 }
 
-// Taken from https://github.com/kubernetes/cloud-provider-openstack/
-// pkg/cloudprovider/providers/openstack/openstack.go
-func toAuthOptions(cfg provider_os.Config) trusts.AuthOptsExt {
+func toAuthOptsExt(cfg provider_os.Config) trusts.AuthOptsExt {
 	opts:=  gophercloud.AuthOptions{
 		IdentityEndpoint: cfg.Global.AuthURL,
 		Username:         cfg.Global.Username,
@@ -96,9 +115,95 @@ func toAuthOptions(cfg provider_os.Config) trusts.AuthOptsExt {
 
 
 func (osm *OpenstackManager) CurrentTotalNodes() (int, error) {
-	result, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
 	if err != nil {
-		return 0, fmt.Errorf("Could not get current total nodes: %v", err)
+		return 0, fmt.Errorf("could not get cluster to get current total nodes: %v", err)
 	}
-	return result.NodeCount, nil
+	return cluster.NodeCount, nil
 }
+
+func (osm *OpenstackManager) UpdateNodeCount(nodes int) error {
+	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	if err != nil {
+		return fmt.Errorf("could not get cluster to update node count: %v", err)
+	}
+	clusterUUID := cluster.UUID
+	updateOpts := []clusters.UpdateOptsBuilder{
+		clusters.UpdateOpts{Op: clusters.ReplaceOp, Path: "/node_count", Value: fmt.Sprintf("%d", nodes)},
+	}
+	_, err = clusters.Update(osm.clusterClient, clusterUUID, updateOpts).Extract()
+	if err != nil {
+		return fmt.Errorf("could not update cluster node count: %v", err)
+	}
+	glog.Infof("Set current node count to %d", nodes)
+	return nil
+}
+
+func (osm *OpenstackManager) GetNodes() ([]string, error) {
+	/*cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("could not get cluster to list nodes: %v", err)
+	}*/
+	/*clusterStackPages, err := stackresources.List(osm.heatClient, "", cluster.StackID, stackresources.ListOpts{}).AllPages()
+	if err != nil {
+		return nil, fmt.Errorf("could not get cluster stack resources pages: %v", err)
+	}
+	clusterStackResources, err := stackresources.ExtractResources(clusterStackPages)
+	if err != nil {
+		return nil, fmt.Errorf("could not extract cluster stack resources: %v", err)
+	}*/
+
+	/*minions, err := stackresources.Get(osm.heatClient, "", cluster.StackID, "scaler-01-lsrc3drq5vy5-kube_minions-iq6r2giq7ubo").Extract()
+	if err != nil {
+		return nil, fmt.Errorf("could not get kube_minions resource: %v", err)
+	}
+
+	glog.Infof("minions: %#v", minions)*/
+
+	/*var nodes []string
+	for _, resource := range clusterStackResources {
+		glog.Infof("Stack resource: %#v", resource)
+		name := resource.Name
+		nodes = append(nodes, name)
+	}*/
+
+	return []string{}, nil
+}
+
+
+func (osm *OpenstackManager) DeleteNode(UID string) error {
+	/*cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	if err != nil {
+		return fmt.Errorf("Could not get cluster to delete node: %v", err)
+	}
+	clusterStackPages, err := stackresources.List(osm.heatClient, "", cluster.StackID, stackresources.ListOpts{}).AllPages()
+	if err != nil {
+		return fmt.Errorf("Could not get cluster stack resources pages: %v", err)
+	}
+	clusterStackResources, err := stackresources.ExtractResources(clusterStackPages)
+	if err != nil {
+		return fmt.Errorf("Could not extract cluster stack resources: %v", err)
+	}
+	glog.Infof("Stack resources: %#v", clusterStackResources)*/
+	deleteResult := servers.Delete(osm.novaClient, UID)
+	errResult := deleteResult.ExtractErr()
+	glog.Infof("Delete result for %s: err=%v", UID, errResult)
+	return errResult
+}
+
+func (osm *OpenstackManager) CanUpdate() (bool, error) {
+	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	if err != nil {
+		return false, fmt.Errorf("could not get cluster to check update capability: %v", err)
+	}
+	return cluster.Status != "UPDATE_IN_PROGRESS", nil
+}
+
+
+/*func (osm *OpenstackManager) GetNodeReferences() ([]OpenstackRef, error) {
+	allServerPages, err := servers.List(osm.instanceClient, servers.ListOpts{}).AllPages()
+	if err != nil {
+		return nil, fmt.Errorf("Could not list all instances in project")
+	}
+
+}*/

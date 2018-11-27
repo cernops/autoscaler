@@ -11,15 +11,18 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
 	"k8s.io/kubernetes/pkg/scheduler/cache"
 	"os"
+	"time"
 )
 
 const (
 	ProviderName = "openstack"
+	WaitForUpdateStateTimeout = 30
 )
 
 type openstackCloudProvider struct {
 	openstackManager *OpenstackManager
 	resourceLimiter *cloudprovider.ResourceLimiter
+	nodeGroups []OpenstackNodeGroup
 }
 
 func BuildOpenstackCloudProvider(openstackManager *OpenstackManager, resourceLimiter *cloudprovider.ResourceLimiter) (cloudprovider.CloudProvider, error) {
@@ -27,7 +30,21 @@ func BuildOpenstackCloudProvider(openstackManager *OpenstackManager, resourceLim
 	os := &openstackCloudProvider{
 		openstackManager: openstackManager,
 		resourceLimiter: resourceLimiter,
+		nodeGroups: make([]OpenstackNodeGroup, 1),
 	}
+	os.nodeGroups[0] = OpenstackNodeGroup{
+		openstackManager: os.openstackManager,
+		id: "Default",
+	}
+
+	os.nodeGroups[0].openstackManager.minSize = 1
+	os.nodeGroups[0].openstackManager.maxSize = 10
+
+	nodes, err := os.openstackManager.CurrentTotalNodes()
+	if err != nil {
+		return nil, fmt.Errorf("could not get current number of nodes: %v", err)
+	}
+	os.nodeGroups[0].openstackManager.targetSize = nodes
 	return os, nil
 }
 
@@ -36,28 +53,15 @@ func (os *openstackCloudProvider) Name() string {
 }
 
 func (os *openstackCloudProvider) NodeGroups() []cloudprovider.NodeGroup {
-	glog.Info("Getting NodeGroups()")
-	groups := []cloudprovider.NodeGroup{}
-	ng := &OpenstackNodeGroup{
-		openstackManager: os.openstackManager,
-		minSize: 0,
-		maxSize: 10,
-		targetSize: 5,
-		id: "Default",
+	groups := make([]cloudprovider.NodeGroup, len(os.nodeGroups))
+	for i, group := range os.nodeGroups {
+		groups[i] = &group
 	}
-	groups = append(groups, ng)
 	return groups
 }
 
 func (os *openstackCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovider.NodeGroup, error) {
-	glog.Infof("Getting NodeGroupForNode(%s)", node.Name)
-	return &OpenstackNodeGroup{
-		openstackManager: os.openstackManager,
-		minSize: 0,
-		maxSize: 10,
-		targetSize: 5,
-		id: "Default",
-	}, nil
+	return &(os.nodeGroups[0]), nil
 }
 
 func (os *openstackCloudProvider) Pricing() (cloudprovider.PricingModel, errors.AutoscalerError) {
@@ -78,103 +82,179 @@ func (os *openstackCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceL
 }
 
 func (os *openstackCloudProvider) Refresh() error {
-	glog.Info("Calling Refresh()")
-	nodes, err := os.openstackManager.CurrentTotalNodes()
+	//glog.Info("Calling Refresh()")
+	/*nodes, err := os.openstackManager.CurrentTotalNodes()
 	if err != nil {
 		return err
 	}
 	glog.Infof("Current nodes: %d", nodes)
+	os.nodeGroups[0].targetSize = nodes*/
 	return nil
 }
 
 func (os *openstackCloudProvider) Cleanup() error {
-	glog.Info("Calling Cleanup()")
 	return nil
 }
-
 
 
 type OpenstackNodeGroup struct {
 	openstackManager *OpenstackManager
-
-	minSize int
-	maxSize int
-	targetSize int
 	id string
 }
 
-func (ng OpenstackNodeGroup) IncreaseSize(delta int) error {
-	glog.Infof("Increasing size by %d", delta)
+func (ng *OpenstackNodeGroup) WaitForUpdateState(timeout int) error {
+	var i int
+	for i=0; i<timeout; i++ {
+		time.Sleep(time.Second)
+		canUpdate, err := ng.openstackManager.CanUpdate()
+		if err != nil {
+			return fmt.Errorf("error waiting for update state: %v", err)
+		}
+		if canUpdate == false {
+			glog.Infof("Waited for update state, took %d seconds", i)
+			return nil
+		}
+	}
+	return fmt.Errorf("timeout waiting for update state")
+}
+
+func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
+	ng.openstackManager.UpdateMutex.Lock()
+	defer ng.openstackManager.UpdateMutex.Unlock()
+
 	if delta <= 0 {
 		return fmt.Errorf("size increase must be positive")
 	}
+	possible, err := ng.openstackManager.CanUpdate()
+	if err != nil {
+		return fmt.Errorf("can not increase node count: %v", err)
+	}
+	if !possible {
+		return fmt.Errorf("can not increase node count, cluster is already updating")
+	}
+	glog.Infof("Increasing size by %d, %d->%d", delta, ng.openstackManager.targetSize, ng.openstackManager.targetSize+delta)
+	ng.openstackManager.targetSize += delta
 
-	return nil
+	err = ng.openstackManager.UpdateNodeCount(ng.openstackManager.targetSize)
+	if err != nil {
+		return fmt.Errorf("could not increase cluster size: %v", err)
+	}
+
+	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
+	return ng.WaitForUpdateState(WaitForUpdateStateTimeout)
 }
 
-func (ng OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
-	glog.Infof("Deleting nodes: %v", nodes)
-	return nil
+
+func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
+	ng.openstackManager.UpdateMutex.Lock()
+	defer ng.openstackManager.UpdateMutex.Unlock()
+
+	var nodeNames []string
+	for _, node := range nodes {
+		nodeNames = append(nodeNames, node.Name)
+	}
+	glog.Infof("Deleting nodes: %v", nodeNames)
+
+	canDelete, err := ng.openstackManager.CanUpdate()
+	if err != nil {
+		return fmt.Errorf("could not check if cluster is ready to delete nodes: %v", err)
+	}
+	if !canDelete {
+		return fmt.Errorf("can not decrease node count, cluster is already updating")
+	}
+
+	for _, node := range nodes {
+		err := ng.openstackManager.DeleteNode(node.Status.NodeInfo.SystemUUID)
+		if err != nil {
+			return fmt.Errorf("could not delete node %s: %v", node.Status.NodeInfo.SystemUUID, err)
+		}
+	}
+
+
+	err = ng.DecreaseTargetSize(-len(nodes))
+	if err != nil {
+		return fmt.Errorf("could not decrease cluster size: %v", err)
+	}
+
+	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
+	return ng.WaitForUpdateState(WaitForUpdateStateTimeout)
 }
 
-func (ng OpenstackNodeGroup) DecreaseTargetSize(delta int) error {
-	glog.Infof("Decreasing target size by %d", delta)
-	return nil
+
+func (ng *OpenstackNodeGroup) DecreaseTargetSize(delta int) error {
+	if delta >= 0 {
+		return fmt.Errorf("size decrease must be negative")
+	}
+	glog.Infof("Decreasing target size by %d, %d->%d", delta, ng.openstackManager.targetSize, ng.openstackManager.targetSize+delta)
+	ng.openstackManager.targetSize += delta
+	return ng.openstackManager.UpdateNodeCount(ng.openstackManager.targetSize)
 }
 
-func (ng OpenstackNodeGroup) Id() string {
+func (ng *OpenstackNodeGroup) Id() string {
 	return ng.id
 }
 
-func (ng OpenstackNodeGroup) Debug() string {
-	return fmt.Sprintf("%s min=%d max=%d target=%d", ng.id, ng.minSize, ng.maxSize, ng.targetSize)
+func (ng *OpenstackNodeGroup) Debug() string {
+	return fmt.Sprintf("%s min=%d max=%d target=%d", ng.id, ng.openstackManager.minSize, ng.openstackManager.maxSize, ng.openstackManager.targetSize)
 }
 
-func (ng OpenstackNodeGroup) Nodes() ([]cloudprovider.Instance, error) {
-	glog.Info("Getting Nodes()")
-	return []cloudprovider.Instance{
+func (ng *OpenstackNodeGroup) Nodes() ([]cloudprovider.Instance, error) {
+	//glog.Info("Getting Nodes()")
+
+	/*return []cloudprovider.Instance{
 		cloudprovider.Instance{Id: "scaler-01-lsrc3drq5vy5-minion-0"},
-	}, nil
+	}, nil*/
+	nodes, err := ng.openstackManager.GetNodes()
+	if err != nil {
+		return nil, fmt.Errorf("could not get nodes: %v", err)
+	}
+	var instances []cloudprovider.Instance
+	for _, node := range nodes {
+		instances = append(instances, cloudprovider.Instance{Id: node})
+	}
+	return instances, nil
 }
 
-func (ng OpenstackNodeGroup) TemplateNodeInfo() (*cache.NodeInfo, error) {
-	glog.Info("Getting TemplateNodeInfo()")
+func (ng *OpenstackNodeGroup) TemplateNodeInfo() (*cache.NodeInfo, error) {
+	//glog.Info("Getting TemplateNodeInfo()")
 	return &cache.NodeInfo{}, nil
 }
 
-func (ng OpenstackNodeGroup) Exist() bool {
+func (ng *OpenstackNodeGroup) Exist() bool {
 	return true
 }
 
-func (ng OpenstackNodeGroup) Create() (cloudprovider.NodeGroup, error) {
+func (ng *OpenstackNodeGroup) Create() (cloudprovider.NodeGroup, error) {
 	return nil, cloudprovider.ErrAlreadyExist
 }
 
-func (ng OpenstackNodeGroup) Delete() error {
+func (ng *OpenstackNodeGroup) Delete() error {
 	return cloudprovider.ErrNotImplemented
 }
 
-func (ng OpenstackNodeGroup) Autoprovisioned() bool {
+func (ng *OpenstackNodeGroup) Autoprovisioned() bool {
 	return false
 }
 
-func (ng OpenstackNodeGroup) MaxSize() int {
-	glog.Info("Calling MaxSize()")
-	return ng.maxSize
+func (ng *OpenstackNodeGroup) MaxSize() int {
+	//glog.Infof("Calling MaxSize(), getting %d", ng.maxSize)
+	return ng.openstackManager.maxSize
 }
 
-func (ng OpenstackNodeGroup) MinSize() int {
-	glog.Info("Calling MinSize()")
-	return ng.minSize
+func (ng *OpenstackNodeGroup) MinSize() int {
+	//glog.Infof("Calling MinSize(), getting %d", ng.minSize)
+	return ng.openstackManager.minSize
 }
 
-func (ng OpenstackNodeGroup) TargetSize() (int, error) {
-	glog.Info("Calling TargetSize()")
-	return ng.targetSize, nil
+func (ng *OpenstackNodeGroup) TargetSize() (int, error) {
+	glog.Infof("Calling TargetSize(), getting %d", ng.openstackManager.targetSize)
+	return ng.openstackManager.targetSize, nil
 }
 
 
-
+type OpenstackRef struct {
+	Name string
+}
 
 
 

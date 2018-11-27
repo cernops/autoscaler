@@ -8,6 +8,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
 	"github.com/gophercloud/gophercloud/openstack/identity/v3/extensions/trusts"
+
 	"sync"
 
 	//"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stackresources"
@@ -15,9 +16,16 @@ import (
 	"os"
 
 	"io"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	provider_os "k8s.io/kubernetes/pkg/cloudprovider/providers/openstack"
 )
+
+const (
+	StatusUpdateInProgress = "UPDATE_IN_PROGRESS"
+)
+
+var StatesPreventingUpdate = sets.NewString(StatusUpdateInProgress)
 
 type OpenstackManager struct {
 	clusterClient *gophercloud.ServiceClient
@@ -153,7 +161,7 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 		return nil, fmt.Errorf("could not extract cluster stack resources: %v", err)
 	}*/
 
-	/*minions, err := stackresources.Get(osm.heatClient, "", cluster.StackID, "scaler-01-lsrc3drq5vy5-kube_minions-iq6r2giq7ubo").Extract()
+	/*minions, err := stackresources.Get(osm.heatClient, "", cluster.StackID, "kube_minions").Extract()
 	if err != nil {
 		return nil, fmt.Errorf("could not get kube_minions resource: %v", err)
 	}
@@ -191,19 +199,18 @@ func (osm *OpenstackManager) DeleteNode(UID string) error {
 	return errResult
 }
 
-func (osm *OpenstackManager) CanUpdate() (bool, error) {
+func (osm *OpenstackManager) GetClusterStatus() (string, error) {
 	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
 	if err != nil {
-		return false, fmt.Errorf("could not get cluster to check update capability: %v", err)
+		return "", fmt.Errorf("could not get cluster to check status: %v", err)
 	}
-	return cluster.Status != "UPDATE_IN_PROGRESS", nil
+	return cluster.Status, nil
 }
 
-
-/*func (osm *OpenstackManager) GetNodeReferences() ([]OpenstackRef, error) {
-	allServerPages, err := servers.List(osm.instanceClient, servers.ListOpts{}).AllPages()
+func (osm *OpenstackManager) CanUpdate() (bool, error) {
+	clusterStatus, err := osm.GetClusterStatus()
 	if err != nil {
-		return nil, fmt.Errorf("Could not list all instances in project")
+		return false, fmt.Errorf("could not get cluster update ability: %v", err)
 	}
-
-}*/
+	return !StatesPreventingUpdate.Has(clusterStatus), nil
+}

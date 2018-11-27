@@ -106,11 +106,11 @@ func (ng *OpenstackNodeGroup) WaitForUpdateState(timeout int) error {
 	var i int
 	for i=0; i<timeout; i++ {
 		time.Sleep(time.Second)
-		canUpdate, err := ng.openstackManager.CanUpdate()
+		clusterStatus, err := ng.openstackManager.GetClusterStatus()
 		if err != nil {
 			return fmt.Errorf("error waiting for update state: %v", err)
 		}
-		if canUpdate == false {
+		if clusterStatus == StatusUpdateInProgress {
 			glog.Infof("Waited for update state, took %d seconds", i)
 			return nil
 		}

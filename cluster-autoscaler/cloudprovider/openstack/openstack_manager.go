@@ -52,12 +52,6 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 
 	opts := toAuthOptsExt(cfg)
 
-	/*opts, err := openstack.AuthOptionsFromEnv()
-	if err != nil {
-		return nil, fmt.Errorf("Could not get env auth options: %v", err)
-	}*/
-
-	//provider, err := openstack.AuthenticatedClient(opts)
 	provider, err := openstack.NewClient(cfg.Global.AuthURL)
 	if err != nil {
 		return nil, fmt.Errorf("could not authenticate client: %v", err)
@@ -101,7 +95,7 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 }
 
 func toAuthOptsExt(cfg provider_os.Config) trusts.AuthOptsExt {
-	opts:=  gophercloud.AuthOptions{
+	opts :=  gophercloud.AuthOptions{
 		IdentityEndpoint: cfg.Global.AuthURL,
 		Username:         cfg.Global.Username,
 		UserID:           cfg.Global.UserID,
@@ -174,7 +168,7 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 		name := resource.Name
 		nodes = append(nodes, name)
 	}*/
-
+	// TODO: get nodes from heat?
 	return []string{}, nil
 }
 

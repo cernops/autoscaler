@@ -100,6 +100,8 @@ func (os *openstackCloudProvider) Cleanup() error {
 type OpenstackNodeGroup struct {
 	openstackManager *OpenstackManager
 	id string
+	// TODO: have something like aws' ASG instead of having to store sizes on the manager?
+	// They are stored there so that when autoscaler copies the nodegroup it can still update the target size
 }
 
 func (ng *OpenstackNodeGroup) WaitForUpdateState(timeout int) error {
@@ -146,6 +148,9 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 
 
 func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
+	// TODO: wait for magnum support for scaling down by deleting specific nodes
+	// Until then we are deleting the VM via nova client and scaling down.
+	// This leads to issues with multiple nodes being deleted at once though
 	ng.openstackManager.UpdateMutex.Lock()
 	defer ng.openstackManager.UpdateMutex.Unlock()
 
@@ -199,11 +204,7 @@ func (ng *OpenstackNodeGroup) Debug() string {
 }
 
 func (ng *OpenstackNodeGroup) Nodes() ([]cloudprovider.Instance, error) {
-	//glog.Info("Getting Nodes()")
-
-	/*return []cloudprovider.Instance{
-		cloudprovider.Instance{Id: "scaler-01-lsrc3drq5vy5-minion-0"},
-	}, nil*/
+	// TODO: manager.GetNodes() does not return anything yet
 	nodes, err := ng.openstackManager.GetNodes()
 	if err != nil {
 		return nil, fmt.Errorf("could not get nodes: %v", err)
@@ -216,7 +217,6 @@ func (ng *OpenstackNodeGroup) Nodes() ([]cloudprovider.Instance, error) {
 }
 
 func (ng *OpenstackNodeGroup) TemplateNodeInfo() (*cache.NodeInfo, error) {
-	//glog.Info("Getting TemplateNodeInfo()")
 	return &cache.NodeInfo{}, nil
 }
 

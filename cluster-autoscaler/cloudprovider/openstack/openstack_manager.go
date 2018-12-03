@@ -11,7 +11,7 @@ import (
 
 	"sync"
 
-	//"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stackresources"
+	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
 	"gopkg.in/gcfg.v1"
 	"os"
 
@@ -174,19 +174,29 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 
 
 func (osm *OpenstackManager) DeleteNode(UID string) error {
-	/*cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	return osm.DeleteViaNova(UID)
+}
+
+// Doesn't work because just updating the stack does not update the cluster
+// and so the node_count on the cluster is not changed.
+func (osm *OpenstackManager) DeleteViaHeat(name string, updatedNodeCount int) error {
+	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
 	if err != nil {
 		return fmt.Errorf("Could not get cluster to delete node: %v", err)
 	}
-	clusterStackPages, err := stackresources.List(osm.heatClient, "", cluster.StackID, stackresources.ListOpts{}).AllPages()
-	if err != nil {
-		return fmt.Errorf("Could not get cluster stack resources pages: %v", err)
+	updateOpts := stacks.UpdateOpts{
+		Parameters: map[string]interface{}{
+			"minions_to_remove": name,
+			"number_of_minions": updatedNodeCount,
+		},
 	}
-	clusterStackResources, err := stackresources.ExtractResources(clusterStackPages)
-	if err != nil {
-		return fmt.Errorf("Could not extract cluster stack resources: %v", err)
-	}
-	glog.Infof("Stack resources: %#v", clusterStackResources)*/
+	updateResult := stacks.UpdatePatch(osm.heatClient, "", cluster.StackID, updateOpts)
+	glog.Infof("Heat update result for %s: %#v", name, updateResult)
+	errResult := updateResult.ExtractErr()
+	return errResult
+}
+
+func (osm *OpenstackManager) DeleteViaNova(UID string) error {
 	deleteResult := servers.Delete(osm.novaClient, UID)
 	errResult := deleteResult.ExtractErr()
 	glog.Infof("Delete result for %s: err=%v", UID, errResult)

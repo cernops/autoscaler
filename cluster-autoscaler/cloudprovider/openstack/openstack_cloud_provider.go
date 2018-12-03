@@ -175,6 +175,19 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 		}
 	}
 
+	/*minionCount, err := ng.openstackManager.CurrentTotalNodes()
+	if err != nil {
+		return fmt.Errorf("could not get current node count")
+	}
+
+	for _, node := range nodes {
+		minionCount -= 1
+		err := ng.openstackManager.DeleteViaHeat(node.GetName(), minionCount)
+		if err != nil {
+			return fmt.Errorf("could not delete node %s: %v", node.Status.NodeInfo.SystemUUID, err)
+		}
+	}*/
+
 
 	err = ng.DecreaseTargetSize(-len(nodes))
 	if err != nil {

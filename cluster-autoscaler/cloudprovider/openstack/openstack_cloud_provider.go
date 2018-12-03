@@ -11,6 +11,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
 	"k8s.io/kubernetes/pkg/scheduler/cache"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -151,6 +152,7 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	// TODO: wait for magnum support for scaling down by deleting specific nodes
 	// Until then we are deleting the VM via nova client and scaling down.
 	// This leads to issues with multiple nodes being deleted at once though
+	glog.Info("Deleting nodes, acquiring lock")
 	ng.openstackManager.UpdateMutex.Lock()
 	defer ng.openstackManager.UpdateMutex.Unlock()
 
@@ -168,19 +170,46 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 		return fmt.Errorf("can not decrease node count, cluster is already updating")
 	}
 
-	for _, node := range nodes {
+	/*for _, node := range nodes {
 		err := ng.openstackManager.DeleteNode(node.Status.NodeInfo.SystemUUID)
 		if err != nil {
 			return fmt.Errorf("could not delete node %s: %v", node.Status.NodeInfo.SystemUUID, err)
 		}
-	}
+	}*/
 
-	/*minionCount, err := ng.openstackManager.CurrentTotalNodes()
+	minionCount, err := ng.openstackManager.CurrentTotalNodes()
 	if err != nil {
 		return fmt.Errorf("could not get current node count")
 	}
 
+	var minionIPs []string
 	for _, node := range nodes {
+		for _, addr := range node.Status.Addresses {
+			glog.Infof("Node address: %#v", addr)
+			if addr.Type == apiv1.NodeInternalIP {
+				minionIPs = append(minionIPs, addr.Address)
+			}
+		}
+	}
+
+	minionsToRemove := strings.Join(minionIPs, ",")
+
+	err = ng.openstackManager.DeleteViaHeat(minionsToRemove, minionCount-len(nodes))
+	if err != nil {
+		return fmt.Errorf("error deleting nodes via heat: %v", err)
+	}
+
+	// Wait for the stack to do it's thing before updating the cluster node_count
+	err = ng.openstackManager.WaitForStackStatus("UPDATE_IN_PROGRESS")
+	if err != nil {
+		return fmt.Errorf("error waiting for stack UPDATE_IN_PROGRESS: %v", err)
+	}
+	err = ng.openstackManager.WaitForStackStatus("UPDATE_COMPLETE")
+	if err != nil {
+		return fmt.Errorf("error waiting for stack UPDATE_COMPLETE: %v", err)
+	}
+
+	/*for _, node := range nodes {
 		minionCount -= 1
 		err := ng.openstackManager.DeleteViaHeat(node.GetName(), minionCount)
 		if err != nil {
@@ -189,10 +218,10 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	}*/
 
 
-	err = ng.DecreaseTargetSize(-len(nodes))
+	/*err = ng.DecreaseTargetSize(-len(nodes))
 	if err != nil {
 		return fmt.Errorf("could not decrease cluster size: %v", err)
-	}
+	}*/
 
 	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
 	return ng.WaitForUpdateState(WaitForUpdateStateTimeout)

@@ -8,6 +8,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
 	"github.com/gophercloud/gophercloud/openstack/identity/v3/extensions/trusts"
+	"time"
 
 	"sync"
 
@@ -179,20 +180,23 @@ func (osm *OpenstackManager) DeleteNode(UID string) error {
 
 // Doesn't work because just updating the stack does not update the cluster
 // and so the node_count on the cluster is not changed.
-func (osm *OpenstackManager) DeleteViaHeat(name string, updatedNodeCount int) error {
+func (osm *OpenstackManager) DeleteViaHeat(minionsToRemove string, updatedNodeCount int) error {
 	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
 	if err != nil {
 		return fmt.Errorf("Could not get cluster to delete node: %v", err)
 	}
 	updateOpts := stacks.UpdateOpts{
 		Parameters: map[string]interface{}{
-			"minions_to_remove": name,
+			"minions_to_remove": minionsToRemove,
 			"number_of_minions": updatedNodeCount,
 		},
 	}
+	glog.Infof("Stack UpdateOpts: %#v", updateOpts)
 	updateResult := stacks.UpdatePatch(osm.heatClient, "", cluster.StackID, updateOpts)
-	glog.Infof("Heat update result for %s: %#v", name, updateResult)
+	glog.Infof("Heat update result for %s: %#v", minionsToRemove, updateResult)
+	glog.Infof("Patch result header: %#v", updateResult.Header)
 	errResult := updateResult.ExtractErr()
+	glog.Infof("errResult: %#v", errResult)
 	return errResult
 }
 
@@ -217,4 +221,30 @@ func (osm *OpenstackManager) CanUpdate() (bool, error) {
 		return false, fmt.Errorf("could not get cluster update ability: %v", err)
 	}
 	return !StatesPreventingUpdate.Has(clusterStatus), nil
+}
+
+func (osm *OpenstackManager) GetStackStatus() (string, error) {
+	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	if err != nil {
+		return "", fmt.Errorf("could not get cluster to get stack status: %v", err)
+	}
+	stack, err := stacks.Get(osm.heatClient, "", cluster.StackID).Extract()
+	if err != nil {
+		return "", fmt.Errorf("could not get stack from heat: %v", err)
+	}
+	return stack.Status, nil
+}
+
+func (osm *OpenstackManager) WaitForStackStatus(status string) error {
+	glog.Infof("Waiting for stack state %s", status)
+	for {
+		currentStatus, err := osm.GetStackStatus()
+		if err != nil {
+			return fmt.Errorf("error waiting for stack status: %v", err)
+		}
+		if currentStatus == status {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
 }

@@ -83,13 +83,7 @@ func (os *openstackCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceL
 }
 
 func (os *openstackCloudProvider) Refresh() error {
-	//glog.Info("Calling Refresh()")
-	/*nodes, err := os.openstackManager.CurrentTotalNodes()
-	if err != nil {
-		return err
-	}
-	glog.Infof("Current nodes: %d", nodes)
-	os.nodeGroups[0].targetSize = nodes*/
+	os.openstackManager.GetNodes()
 	return nil
 }
 
@@ -114,13 +108,16 @@ func (ng *OpenstackNodeGroup) WaitForUpdateState(timeout int) error {
 			return fmt.Errorf("error waiting for update state: %v", err)
 		}
 		if clusterStatus == StatusUpdateInProgress {
-			glog.Infof("Waited for update state, took %d seconds", i)
+			glog.Infof("Waited for cluster UPDATE_IN_PROGRESS state, took %d seconds", i)
 			return nil
 		}
 	}
 	return fmt.Errorf("timeout waiting for update state")
 }
 
+
+// Increases the number of nodes by replacing the cluster's node_count.
+// Takes precautions so that the cluster is not modified while in an UPDATE_IN_PROGRESS state.
 func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	ng.openstackManager.UpdateMutex.Lock()
 	defer ng.openstackManager.UpdateMutex.Unlock()
@@ -133,7 +130,7 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 		return fmt.Errorf("can not increase node count: %v", err)
 	}
 	if !possible {
-		return fmt.Errorf("can not increase node count, cluster is already updating")
+		return fmt.Errorf("can not add nodes, cluster is already updating")
 	}
 	glog.Infof("Increasing size by %d, %d->%d", delta, ng.openstackManager.targetSize, ng.openstackManager.targetSize+delta)
 	ng.openstackManager.targetSize += delta
@@ -148,11 +145,11 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 }
 
 
+// Delete a set of nodes by removing them from the heat stack
+// and then scaling down the cluster to match the stack's new minion count.
+// Takes precautions so that the cluster/stack are not modified while in
+// an UPDATE_IN_PROGRESS state.
 func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
-	// TODO: wait for magnum support for scaling down by deleting specific nodes
-	// Until then we are deleting the VM via nova client and scaling down.
-	// This leads to issues with multiple nodes being deleted at once though
-	glog.Info("Deleting nodes, acquiring lock")
 	ng.openstackManager.UpdateMutex.Lock()
 	defer ng.openstackManager.UpdateMutex.Unlock()
 
@@ -167,15 +164,8 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 		return fmt.Errorf("could not check if cluster is ready to delete nodes: %v", err)
 	}
 	if !canDelete {
-		return fmt.Errorf("can not decrease node count, cluster is already updating")
+		return fmt.Errorf("can not delete nodes, cluster is already updating")
 	}
-
-	/*for _, node := range nodes {
-		err := ng.openstackManager.DeleteNode(node.Status.NodeInfo.SystemUUID)
-		if err != nil {
-			return fmt.Errorf("could not delete node %s: %v", node.Status.NodeInfo.SystemUUID, err)
-		}
-	}*/
 
 	minionCount, err := ng.openstackManager.CurrentTotalNodes()
 	if err != nil {
@@ -185,16 +175,16 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	var minionIPs []string
 	for _, node := range nodes {
 		for _, addr := range node.Status.Addresses {
-			glog.Infof("Node address: %#v", addr)
 			if addr.Type == apiv1.NodeInternalIP {
 				minionIPs = append(minionIPs, addr.Address)
+				break
 			}
 		}
 	}
 
 	minionsToRemove := strings.Join(minionIPs, ",")
 
-	err = ng.openstackManager.DeleteViaHeat(minionsToRemove, minionCount-len(nodes))
+	err = ng.openstackManager.DeleteNodes(minionsToRemove, minionCount-len(nodes))
 	if err != nil {
 		return fmt.Errorf("error deleting nodes via heat: %v", err)
 	}
@@ -209,20 +199,12 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 		return fmt.Errorf("error waiting for stack UPDATE_COMPLETE: %v", err)
 	}
 
-	/*for _, node := range nodes {
-		minionCount -= 1
-		err := ng.openstackManager.DeleteViaHeat(node.GetName(), minionCount)
-		if err != nil {
-			return fmt.Errorf("could not delete node %s: %v", node.Status.NodeInfo.SystemUUID, err)
-		}
-	}*/
-
-
-	/*err = ng.DecreaseTargetSize(-len(nodes))
+	err = ng.DecreaseTargetSize(-len(nodes))
 	if err != nil {
 		return fmt.Errorf("could not decrease cluster size: %v", err)
-	}*/
+	}
 
+	glog.Info("Waiting for cluster UPDATE_IN_PROGRESS")
 	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
 	return ng.WaitForUpdateState(WaitForUpdateStateTimeout)
 }
@@ -246,7 +228,6 @@ func (ng *OpenstackNodeGroup) Debug() string {
 }
 
 func (ng *OpenstackNodeGroup) Nodes() ([]cloudprovider.Instance, error) {
-	// TODO: manager.GetNodes() does not return anything yet
 	nodes, err := ng.openstackManager.GetNodes()
 	if err != nil {
 		return nil, fmt.Errorf("could not get nodes: %v", err)
@@ -289,15 +270,8 @@ func (ng *OpenstackNodeGroup) MinSize() int {
 }
 
 func (ng *OpenstackNodeGroup) TargetSize() (int, error) {
-	glog.Infof("Calling TargetSize(), getting %d", ng.openstackManager.targetSize)
 	return ng.openstackManager.targetSize, nil
 }
-
-
-type OpenstackRef struct {
-	Name string
-}
-
 
 
 func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDiscoveryOptions, rl *cloudprovider.ResourceLimiter) cloudprovider.CloudProvider {

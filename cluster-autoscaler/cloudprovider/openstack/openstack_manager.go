@@ -5,7 +5,6 @@ import (
 	"github.com/golang/glog"
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
 	"github.com/gophercloud/gophercloud/openstack/identity/v3/extensions/trusts"
 	"time"
@@ -33,6 +32,9 @@ type OpenstackManager struct {
 	novaClient *gophercloud.ServiceClient
 	heatClient *gophercloud.ServiceClient
 	clusterName string
+
+	stackName string
+	stackID string
 
 	UpdateMutex sync.Mutex
 
@@ -92,6 +94,15 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 		heatClient: heatClient,
 	}
 
+	manager.stackID, err = manager.GetStackID()
+	if err != nil {
+		return nil, fmt.Errorf("could not store stack ID on manager: %v", err)
+	}
+	manager.stackName, err = manager.GetStackName()
+	if err != nil {
+		return nil, fmt.Errorf("could not store stack name on manager: %v", err)
+	}
+
 	return &manager, nil
 }
 
@@ -138,7 +149,6 @@ func (osm *OpenstackManager) UpdateNodeCount(nodes int) error {
 	if err != nil {
 		return fmt.Errorf("could not update cluster node count: %v", err)
 	}
-	glog.Infof("Set current node count to %d", nodes)
 	return nil
 }
 
@@ -147,21 +157,62 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not get cluster to list nodes: %v", err)
 	}*/
-	/*clusterStackPages, err := stackresources.List(osm.heatClient, "", cluster.StackID, stackresources.ListOpts{}).AllPages()
+	/*clusterStackPages, err := stackresources.List(osm.heatClient, osm.stackName, osm.stackID, stackresources.ListOpts{}).AllPages()
 	if err != nil {
 		return nil, fmt.Errorf("could not get cluster stack resources pages: %v", err)
 	}
 	clusterStackResources, err := stackresources.ExtractResources(clusterStackPages)
 	if err != nil {
 		return nil, fmt.Errorf("could not extract cluster stack resources: %v", err)
-	}*/
+	}
 
-	/*minions, err := stackresources.Get(osm.heatClient, "", cluster.StackID, "kube_minions").Extract()
+	glog.Infof("%#v", clusterStackResources)*/
+
+
+	// I don't know what exactly should be returned in this.
+	// GKE has fmt.Sprintf("gce://%s/%s/%s", ref.Project, ref.Zone, ref.Name))
+	// But I don't know what it's used for anyway
+
+	var minionIPs []string
+
+	stack, err := stacks.Get(osm.heatClient, osm.stackName, osm.stackID).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("could not get stack: %v", err)
+	}
+	for _, output := range stack.Outputs {
+		if output["output_key"] == "kube_minions" {
+			outputValue := output["output_value"].([]interface{})
+			glog.Infof("outputValue: %#v", outputValue)
+			for _, ip := range outputValue {
+				// This value is nil for newly spawned nodes, then "", then finally the IP
+				if ip != nil {
+					if ip != "" {
+						minionIPs = append(minionIPs, ip.(string))
+					}
+				}
+			}
+		}
+	}
+	//glog.Infof("minion IPs: %#v", minionIPs)
+
+	/*minions, err := stackresources.Get(osm.heatClient, osm.stackName, osm.stackID, "kube_minions").Extract()
 	if err != nil {
 		return nil, fmt.Errorf("could not get kube_minions resource: %v", err)
 	}
 
 	glog.Infof("minions: %#v", minions)*/
+
+	/*metadata, err := stackresources.Metadata(osm.heatClient, osm.stackName, osm.stackID, "kube_minions").Extract()
+	if err != nil {
+		return nil, fmt.Errorf("could not get kube_minions metadata: %v", err)
+	}
+	glog.Infof("metadata: %#v", metadata)*/
+
+	/*resources, err := stackresources.Find(osm.heatClient, osm.stackName).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("could not find for stacks: %v", err)
+	}
+	glog.Infof("find: %#v", resources)*/
 
 	/*var nodes []string
 	for _, resource := range clusterStackResources {
@@ -169,41 +220,24 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 		name := resource.Name
 		nodes = append(nodes, name)
 	}*/
-	// TODO: get nodes from heat?
+	// TODO: get nodes from heat? Wait for proper nodegroups?
+	// This works fine being empty for now anyway
 	return []string{}, nil
 }
 
 
-func (osm *OpenstackManager) DeleteNode(UID string) error {
-	return osm.DeleteViaNova(UID)
-}
-
-// Doesn't work because just updating the stack does not update the cluster
-// and so the node_count on the cluster is not changed.
-func (osm *OpenstackManager) DeleteViaHeat(minionsToRemove string, updatedNodeCount int) error {
-	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
-	if err != nil {
-		return fmt.Errorf("Could not get cluster to delete node: %v", err)
-	}
+// Deletes nodes by passing a comma separated list of names or IPs
+// of minions to remove to heat, and sets the new number of minions on the stack.
+func (osm *OpenstackManager) DeleteNodes(minionsToRemove string, updatedNodeCount int) error {
 	updateOpts := stacks.UpdateOpts{
 		Parameters: map[string]interface{}{
 			"minions_to_remove": minionsToRemove,
 			"number_of_minions": updatedNodeCount,
 		},
 	}
-	glog.Infof("Stack UpdateOpts: %#v", updateOpts)
-	updateResult := stacks.UpdatePatch(osm.heatClient, "", cluster.StackID, updateOpts)
-	glog.Infof("Heat update result for %s: %#v", minionsToRemove, updateResult)
-	glog.Infof("Patch result header: %#v", updateResult.Header)
-	errResult := updateResult.ExtractErr()
-	glog.Infof("errResult: %#v", errResult)
-	return errResult
-}
 
-func (osm *OpenstackManager) DeleteViaNova(UID string) error {
-	deleteResult := servers.Delete(osm.novaClient, UID)
-	errResult := deleteResult.ExtractErr()
-	glog.Infof("Delete result for %s: err=%v", UID, errResult)
+	updateResult := stacks.UpdatePatch(osm.heatClient, osm.stackName, osm.stackID, updateOpts)
+	errResult := updateResult.ExtractErr()
 	return errResult
 }
 
@@ -224,11 +258,7 @@ func (osm *OpenstackManager) CanUpdate() (bool, error) {
 }
 
 func (osm *OpenstackManager) GetStackStatus() (string, error) {
-	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
-	if err != nil {
-		return "", fmt.Errorf("could not get cluster to get stack status: %v", err)
-	}
-	stack, err := stacks.Get(osm.heatClient, "", cluster.StackID).Extract()
+	stack, err := stacks.Get(osm.heatClient, osm.stackName, osm.stackID).Extract()
 	if err != nil {
 		return "", fmt.Errorf("could not get stack from heat: %v", err)
 	}
@@ -242,9 +272,26 @@ func (osm *OpenstackManager) WaitForStackStatus(status string) error {
 		if err != nil {
 			return fmt.Errorf("error waiting for stack status: %v", err)
 		}
+		// glog.Infof("CURRENT STACK STATUS: %s", currentStatus)
 		if currentStatus == status {
 			return nil
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func (osm *OpenstackManager) GetStackID() (string, error) {
+	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
+	if err != nil {
+		return "", fmt.Errorf("could not get cluster to get stack ID: %v", err)
+	}
+	return cluster.StackID, nil
+}
+
+func (osm *OpenstackManager) GetStackName() (string, error) {
+	stack, err := stacks.Get(osm.heatClient, "", osm.stackID).Extract()
+	if err != nil {
+		return "", fmt.Errorf("could not get stack from heat: %v", err)
+	}
+	return stack.Name, nil
 }

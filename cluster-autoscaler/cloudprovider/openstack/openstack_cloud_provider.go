@@ -151,15 +151,15 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 
 	// Attempt at batching simultaneous deletes on individual nodes
-	/*ng.openstackManager.nodesToDeleteMutex.Lock()
+	ng.openstackManager.nodesToDeleteMutex.Lock()
 	ng.openstackManager.nodesToDelete = append(ng.openstackManager.nodesToDelete, nodes...)
-	ng.openstackManager.nodesToDeleteMutex.Unlock()*/
+	ng.openstackManager.nodesToDeleteMutex.Unlock()
 
 	ng.openstackManager.UpdateMutex.Lock()
 	defer ng.openstackManager.UpdateMutex.Unlock()
 
-	/*if len(ng.openstackManager.nodesToDelete) == 0 {
-		// Deletion was handled by another batch
+	if len(ng.openstackManager.nodesToDelete) == 0 {
+		// Deletion was handled by another goroutine
 		return nil
 	}
 
@@ -167,7 +167,7 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 
 	nodes = make([]*apiv1.Node, len(ng.openstackManager.nodesToDelete))
 	copy(nodes, ng.openstackManager.nodesToDelete)
-	ng.openstackManager.nodesToDelete = nil*/
+	ng.openstackManager.nodesToDelete = nil
 
 	var nodeNames []string
 	for _, node := range nodes {

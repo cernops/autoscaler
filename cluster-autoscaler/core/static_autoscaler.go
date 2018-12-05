@@ -379,7 +379,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 			}
 
 			if typedErr != nil {
-				glog.Errorf("Failed to scale down: %v", err)
+				glog.Errorf("Failed to scale down: %v", typedErr)
 				a.lastScaleDownFailTime = currentTime
 				return typedErr
 			}

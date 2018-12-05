@@ -83,7 +83,6 @@ func (os *openstackCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceL
 }
 
 func (os *openstackCloudProvider) Refresh() error {
-	os.openstackManager.GetNodes()
 	return nil
 }
 
@@ -150,8 +149,25 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 // Takes precautions so that the cluster/stack are not modified while in
 // an UPDATE_IN_PROGRESS state.
 func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
+
+	// Attempt at batching simultaneous deletes on individual nodes
+	/*ng.openstackManager.nodesToDeleteMutex.Lock()
+	ng.openstackManager.nodesToDelete = append(ng.openstackManager.nodesToDelete, nodes...)
+	ng.openstackManager.nodesToDeleteMutex.Unlock()*/
+
 	ng.openstackManager.UpdateMutex.Lock()
 	defer ng.openstackManager.UpdateMutex.Unlock()
+
+	/*if len(ng.openstackManager.nodesToDelete) == 0 {
+		// Deletion was handled by another batch
+		return nil
+	}
+
+	time.Sleep(2 * time.Second)
+
+	nodes = make([]*apiv1.Node, len(ng.openstackManager.nodesToDelete))
+	copy(nodes, ng.openstackManager.nodesToDelete)
+	ng.openstackManager.nodesToDelete = nil*/
 
 	var nodeNames []string
 	for _, node := range nodes {

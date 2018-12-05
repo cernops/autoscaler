@@ -7,7 +7,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack"
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
 	"github.com/gophercloud/gophercloud/openstack/identity/v3/extensions/trusts"
-	"os"
+	"k8s.io/autoscaler/cluster-autoscaler/config"
 	"time"
 
 	"sync"
@@ -48,7 +48,7 @@ type OpenstackManager struct {
 
 }
 
-func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.NodeGroupDiscoveryOptions) (*OpenstackManager, error) {
+func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.NodeGroupDiscoveryOptions, opts config.AutoscalingOptions) (*OpenstackManager, error) {
 	var cfg provider_os.Config
 	if configReader != nil {
 		if err := gcfg.ReadInto(&cfg, configReader); err != nil {
@@ -57,14 +57,18 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 		}
 	}
 
-	opts := toAuthOptsExt(cfg)
+	if opts.ClusterName == "" {
+		glog.Fatalf("The cluster-name parameter must be set")
+	}
+
+	authOpts := toAuthOptsExt(cfg)
 
 	provider, err := openstack.NewClient(cfg.Global.AuthURL)
 	if err != nil {
 		return nil, fmt.Errorf("could not authenticate client: %v", err)
 	}
 
-	err = openstack.AuthenticateV3(provider, opts, gophercloud.EndpointOpts{})
+	err = openstack.AuthenticateV3(provider, authOpts, gophercloud.EndpointOpts{})
 	if err != nil {
 		return nil, fmt.Errorf("could not authenticate: %v", err)
 	}
@@ -84,30 +88,12 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 		return nil, fmt.Errorf("could not create orchestration client: %v", err)
 	}
 
-	// Temporary, can get from CLUSTER_UUID from
-	// /etc/sysconfig/heat-params in master node.
-	// But that file seems to be read protected
-	clusterName := os.Getenv("CLUSTER_NAME")
-	if clusterName == "" {
-		return nil, fmt.Errorf("please set env var CLUSTER_NAME of cluster to manage")
-	}
-
 	manager := OpenstackManager{
 		clusterClient: clusterClient,
-		clusterName: clusterName,
+		clusterName: opts.ClusterName,
 		novaClient: novaClient,
 		heatClient: heatClient,
 	}
-
-	/*clusterUUID, err := manager.GetClusterUUID()
-	if err != nil {
-		return nil, fmt.Errorf("could not get cluster UUID: %v", err)
-	}
-	clusterName, err := manager.GetClusterName(clusterUUID)
-	if err != nil {
-		return nil, fmt.Errorf("could not get cluster name: %v", err)
-	}
-	manager.clusterName = clusterName*/
 
 	manager.stackID, err = manager.GetStackID()
 	if err != nil {
@@ -309,33 +295,3 @@ func (osm *OpenstackManager) GetStackName() (string, error) {
 	}
 	return stack.Name, nil
 }
-
-
-
-/*type heatParams struct {
-	clusterUUID string `gcfg:"CLUSTER_UUID"`
-}
-
-func (osm *OpenstackManager) GetClusterUUID() (string, error) {
-	var params heatParams
-	if err := gcfg.ReadFileInto(&params, "heat-params"); err != nil {
-		return "", fmt.Errorf("could not read heat-params")
-	}
-	return params.clusterUUID, nil
-}
-
-func (osm *OpenstackManager) GetClusterName(clusterUUID string) (string, error) {
-	clusterPages, err := clusters.List(osm.clusterClient, clusters.ListOpts{}).AllPages()
-	if err != nil {
-		return "", fmt.Errorf("could not list clusters: %v", err)
-	}
-	allClusters, err := clusters.ExtractClusters(clusterPages)
-	if err != nil {
-		return "", fmt.Errorf("could not extract list of clusters: %v", err)
-	}
-	for _, cluster := range allClusters {
-		if cluster.UUID == clusterUUID {
-			return cluster.Name, nil
-		}
-	}
-}*/

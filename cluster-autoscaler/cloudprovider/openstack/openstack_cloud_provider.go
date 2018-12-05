@@ -303,7 +303,7 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 		defer config.Close()
 	}
 
-	manager, err := CreateOpenstackManager(config, do)
+	manager, err := CreateOpenstackManager(config, do, opts)
 	if err != nil {
 		glog.Fatalf("Failed to create openstack manager: %v", err)
 	}

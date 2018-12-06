@@ -165,9 +165,11 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 
 	time.Sleep(2 * time.Second)
 
+	ng.openstackManager.nodesToDeleteMutex.Lock()
 	nodes = make([]*apiv1.Node, len(ng.openstackManager.nodesToDelete))
 	copy(nodes, ng.openstackManager.nodesToDelete)
 	ng.openstackManager.nodesToDelete = nil
+	ng.openstackManager.nodesToDeleteMutex.Unlock()
 
 	var nodeNames []string
 	for _, node := range nodes {

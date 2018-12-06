@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	"k8s.io/autoscaler/cluster-autoscaler/config"
+	"k8s.io/autoscaler/cluster-autoscaler/config/dynamic"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
 	"k8s.io/kubernetes/pkg/scheduler/cache"
 	"os"
@@ -31,21 +32,8 @@ func BuildOpenstackCloudProvider(openstackManager *OpenstackManager, resourceLim
 	os := &openstackCloudProvider{
 		openstackManager: openstackManager,
 		resourceLimiter: resourceLimiter,
-		nodeGroups: make([]OpenstackNodeGroup, 1),
+		nodeGroups: []OpenstackNodeGroup{},
 	}
-	os.nodeGroups[0] = OpenstackNodeGroup{
-		openstackManager: os.openstackManager,
-		id: "Default",
-	}
-
-	os.nodeGroups[0].openstackManager.minSize = 1
-	os.nodeGroups[0].openstackManager.maxSize = 10
-
-	nodes, err := os.openstackManager.CurrentTotalNodes()
-	if err != nil {
-		return nil, fmt.Errorf("could not get current number of nodes: %v", err)
-	}
-	os.nodeGroups[0].openstackManager.targetSize = nodes
 	return os, nil
 }
 
@@ -59,6 +47,10 @@ func (os *openstackCloudProvider) NodeGroups() []cloudprovider.NodeGroup {
 		groups[i] = &group
 	}
 	return groups
+}
+
+func (os *openstackCloudProvider) AddNodeGroup(group OpenstackNodeGroup) {
+	os.nodeGroups = append(os.nodeGroups, group)
 }
 
 func (os *openstackCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovider.NodeGroup, error) {
@@ -314,5 +306,34 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 	if err != nil {
 		glog.Fatalf("Failed to create openstack cloud provider: %v", err)
 	}
+
+	if len(do.NodeGroupSpecs) == 0 {
+		glog.Fatalf("Must specify at least one node group with --nodes=<min>:<max>:<name>,...")
+	}
+
+	// Temporary, only makes sense to have one nodegroup until magnum nodegroups are implemented
+	if len(do.NodeGroupSpecs) > 1 {
+		glog.Fatalf("Openstack autoscaler only supports a single nodegroup for now")
+	}
+
+	for _, nodegroupSpec := range do.NodeGroupSpecs {
+		spec, err := dynamic.SpecFromString(nodegroupSpec, true)
+		if err != nil {
+			glog.Fatalf("Could not parse node group spec: %v", nodegroupSpec)
+		}
+
+		ng := OpenstackNodeGroup{
+			openstackManager: manager,
+			id: spec.Name,
+		}
+		ng.openstackManager.minSize = spec.MinSize
+		ng.openstackManager.maxSize = spec.MaxSize
+		ng.openstackManager.targetSize, err = ng.openstackManager.CurrentTotalNodes()
+		if err != nil {
+			glog.Fatalf("Could not set current nodes in node group: %v", err)
+		}
+		provider.(*openstackCloudProvider).AddNodeGroup(ng)
+	}
+
 	return provider
 }

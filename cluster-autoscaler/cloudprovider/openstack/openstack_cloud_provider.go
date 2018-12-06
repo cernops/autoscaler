@@ -319,7 +319,7 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 	for _, nodegroupSpec := range do.NodeGroupSpecs {
 		spec, err := dynamic.SpecFromString(nodegroupSpec, true)
 		if err != nil {
-			glog.Fatalf("Could not parse node group spec: %v", nodegroupSpec)
+			glog.Fatalf("Could not parse node group spec %s: %v", nodegroupSpec, err)
 		}
 
 		ng := OpenstackNodeGroup{

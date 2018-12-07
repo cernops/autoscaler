@@ -265,19 +265,22 @@ func (osm *OpenstackManager) GetStackStatus() (string, error) {
 	return stack.Status, nil
 }
 
-func (osm *OpenstackManager) WaitForStackStatus(status string) error {
-	glog.Infof("Waiting for stack state %s", status)
-	for {
+// Wait for heat stack to change to a given status
+// Takes a timeout as an argument because it should be different depending on the status
+func (osm *OpenstackManager) WaitForStackStatus(status string, timeout time.Duration) error {
+	glog.Infof("Waiting for stack status %s", status)
+	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
 		currentStatus, err := osm.GetStackStatus()
 		if err != nil {
 			return fmt.Errorf("error waiting for stack status: %v", err)
 		}
-		// glog.Infof("CURRENT STACK STATUS: %s", currentStatus)
 		if currentStatus == status {
+			glog.Infof("Waited %d seconds for stack status %s", int(time.Since(start).Seconds()), status)
 			return nil
 		}
 		time.Sleep(time.Second)
 	}
+	return fmt.Errorf("timeout (%v) waiting for stack status %s", timeout, status)
 }
 
 func (osm *OpenstackManager) GetStackID() (string, error) {

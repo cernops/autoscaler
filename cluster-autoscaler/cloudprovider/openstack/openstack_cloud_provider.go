@@ -18,7 +18,8 @@ import (
 
 const (
 	ProviderName = "openstack"
-	WaitForUpdateStateTimeout = 30
+	WaitForUpdateStatusTimeout = 30 * time.Second
+	WaitForCompleteStatusTimout = 10 * time.Minute
 )
 
 type openstackCloudProvider struct {
@@ -90,16 +91,14 @@ type OpenstackNodeGroup struct {
 	// They are stored there so that when autoscaler copies the nodegroup it can still update the target size
 }
 
-func (ng *OpenstackNodeGroup) WaitForUpdateState(timeout int) error {
-	var i int
-	for i=0; i<timeout; i++ {
-		time.Sleep(time.Second)
+func (ng *OpenstackNodeGroup) WaitForUpdateState(timeout time.Duration) error {
+	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
 		clusterStatus, err := ng.openstackManager.GetClusterStatus()
 		if err != nil {
 			return fmt.Errorf("error waiting for update state: %v", err)
 		}
 		if clusterStatus == StatusUpdateInProgress {
-			glog.Infof("Waited for cluster UPDATE_IN_PROGRESS state, took %d seconds", i)
+			glog.Infof("Waited for cluster UPDATE_IN_PROGRESS state, took %d seconds", int(time.Since(start).Seconds()))
 			return nil
 		}
 	}
@@ -132,7 +131,7 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	}
 
 	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
-	return ng.WaitForUpdateState(WaitForUpdateStateTimeout)
+	return ng.WaitForUpdateState(WaitForUpdateStatusTimeout)
 }
 
 
@@ -200,11 +199,11 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	}
 
 	// Wait for the stack to do it's thing before updating the cluster node_count
-	err = ng.openstackManager.WaitForStackStatus("UPDATE_IN_PROGRESS")
+	err = ng.openstackManager.WaitForStackStatus("UPDATE_IN_PROGRESS", WaitForUpdateStatusTimeout)
 	if err != nil {
 		return fmt.Errorf("error waiting for stack UPDATE_IN_PROGRESS: %v", err)
 	}
-	err = ng.openstackManager.WaitForStackStatus("UPDATE_COMPLETE")
+	err = ng.openstackManager.WaitForStackStatus("UPDATE_COMPLETE", WaitForCompleteStatusTimout)
 	if err != nil {
 		return fmt.Errorf("error waiting for stack UPDATE_COMPLETE: %v", err)
 	}
@@ -216,7 +215,7 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 
 	glog.Info("Waiting for cluster UPDATE_IN_PROGRESS")
 	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
-	return ng.WaitForUpdateState(WaitForUpdateStateTimeout)
+	return ng.WaitForUpdateState(WaitForUpdateStatusTimeout)
 }
 
 

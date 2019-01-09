@@ -10,6 +10,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/config"
 	"k8s.io/autoscaler/cluster-autoscaler/config/dynamic"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
+	kube_client "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/pkg/scheduler/cache"
 	"os"
 	"strings"
@@ -86,6 +87,8 @@ type OpenstackNodeGroup struct {
 	id               string
 	// TODO: have something like aws' ASG instead of having to store sizes on the manager?
 	// They are stored there so that when autoscaler copies the nodegroup it can still update the target size
+
+	kubeClient *kube_client.Clientset
 }
 
 func (ng *OpenstackNodeGroup) WaitForClusterStatus(status string, timeout time.Duration) error {
@@ -127,8 +130,15 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	}
 
 	// Block until cluster has gone into update status and then completed
-	ng.WaitForClusterStatus(ClusterStatusUpdateInProgress, WaitForUpdateStatusTimeout)
-	return ng.WaitForClusterStatus(ClusterStatusUpdateComplete, WaitForCompleteStatusTimout)
+	err = ng.WaitForClusterStatus(ClusterStatusUpdateInProgress, WaitForUpdateStatusTimeout)
+	if err != nil {
+		return fmt.Errorf("scale up error: %v", err)
+	}
+	err = ng.WaitForClusterStatus(ClusterStatusUpdateComplete, WaitForCompleteStatusTimout)
+	if err != nil {
+		return fmt.Errorf("scale up error: %v", err)
+	}
+	return nil
 }
 
 // Delete a set of nodes by removing them from the heat stack
@@ -185,6 +195,8 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 				break
 			}
 		}
+
+
 	}
 
 	minionsToRemove := strings.Join(minionIPs, ",")
@@ -210,8 +222,17 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	}
 
 	// Block until cluster has gone into update status and then completed
-	ng.WaitForClusterStatus(ClusterStatusUpdateInProgress, WaitForUpdateStatusTimeout)
-	return ng.WaitForClusterStatus(ClusterStatusUpdateComplete, WaitForCompleteStatusTimout)
+	err = ng.WaitForClusterStatus(ClusterStatusUpdateInProgress, WaitForUpdateStatusTimeout)
+	if err != nil {
+		return fmt.Errorf("scale down error: %v", err)
+	}
+	err = ng.WaitForClusterStatus(ClusterStatusUpdateComplete, WaitForCompleteStatusTimout)
+	if err != nil {
+		return fmt.Errorf("scale down error: %v", err)
+	}
+
+	// Delete nodes from kubernetes node list after scale down is complete
+	return cleanupNodes(ng.kubeClient, nodeNames)
 }
 
 func (ng *OpenstackNodeGroup) DecreaseTargetSize(delta int) error {
@@ -317,7 +338,8 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 
 		ng := OpenstackNodeGroup{
 			openstackManager: manager,
-			id: spec.Name,
+			id:               spec.Name,
+			kubeClient:       makeKubeClient(),
 		}
 		ng.openstackManager.minSize = spec.MinSize
 		ng.openstackManager.maxSize = spec.MaxSize

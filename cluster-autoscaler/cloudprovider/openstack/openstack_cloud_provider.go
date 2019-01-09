@@ -18,22 +18,20 @@ import (
 
 const (
 	ProviderName = "openstack"
-	WaitForUpdateStatusTimeout = 30 * time.Second
-	WaitForCompleteStatusTimout = 10 * time.Minute
 )
 
 type openstackCloudProvider struct {
 	openstackManager *OpenstackManager
-	resourceLimiter *cloudprovider.ResourceLimiter
-	nodeGroups []OpenstackNodeGroup
+	resourceLimiter  *cloudprovider.ResourceLimiter
+	nodeGroups       []OpenstackNodeGroup
 }
 
 func BuildOpenstackCloudProvider(openstackManager *OpenstackManager, resourceLimiter *cloudprovider.ResourceLimiter) (cloudprovider.CloudProvider, error) {
 	glog.Info("Building openstack cloud provider")
 	os := &openstackCloudProvider{
 		openstackManager: openstackManager,
-		resourceLimiter: resourceLimiter,
-		nodeGroups: []OpenstackNodeGroup{},
+		resourceLimiter:  resourceLimiter,
+		nodeGroups:       []OpenstackNodeGroup{},
 	}
 	return os, nil
 }
@@ -68,7 +66,7 @@ func (os *openstackCloudProvider) GetAvailableMachineTypes() ([]string, error) {
 
 func (os *openstackCloudProvider) NewNodeGroup(machineType string, labels map[string]string, systemLabels map[string]string,
 	taints []apiv1.Taint, extraResources map[string]resource.Quantity) (cloudprovider.NodeGroup, error) {
-		return nil, cloudprovider.ErrNotImplemented
+	return nil, cloudprovider.ErrNotImplemented
 }
 
 func (os *openstackCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceLimiter, error) {
@@ -83,28 +81,26 @@ func (os *openstackCloudProvider) Cleanup() error {
 	return nil
 }
 
-
 type OpenstackNodeGroup struct {
 	openstackManager *OpenstackManager
-	id string
+	id               string
 	// TODO: have something like aws' ASG instead of having to store sizes on the manager?
 	// They are stored there so that when autoscaler copies the nodegroup it can still update the target size
 }
 
-func (ng *OpenstackNodeGroup) WaitForUpdateState(timeout time.Duration) error {
+func (ng *OpenstackNodeGroup) WaitForClusterStatus(status string, timeout time.Duration) error {
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
 		clusterStatus, err := ng.openstackManager.GetClusterStatus()
 		if err != nil {
-			return fmt.Errorf("error waiting for update state: %v", err)
+			return fmt.Errorf("error waiting for %s status: %v", status, err)
 		}
-		if clusterStatus == StatusUpdateInProgress {
-			glog.Infof("Waited for cluster UPDATE_IN_PROGRESS state, took %d seconds", int(time.Since(start).Seconds()))
+		if clusterStatus == status {
+			glog.Infof("Waited for cluster %s status, took %d seconds", status, int(time.Since(start).Seconds()))
 			return nil
 		}
 	}
-	return fmt.Errorf("timeout waiting for update state")
+	return fmt.Errorf("timeout waiting for %s status", status)
 }
-
 
 // Increases the number of nodes by replacing the cluster's node_count.
 // Takes precautions so that the cluster is not modified while in an UPDATE_IN_PROGRESS state.
@@ -115,12 +111,12 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	if delta <= 0 {
 		return fmt.Errorf("size increase must be positive")
 	}
-	possible, err := ng.openstackManager.CanUpdate()
+	updatePossible, currentStatus, err := ng.openstackManager.CanUpdate()
 	if err != nil {
 		return fmt.Errorf("can not increase node count: %v", err)
 	}
-	if !possible {
-		return fmt.Errorf("can not add nodes, cluster is already updating")
+	if !updatePossible {
+		return fmt.Errorf("can not add nodes, cluster is in %s status", currentStatus)
 	}
 	glog.Infof("Increasing size by %d, %d->%d", delta, ng.openstackManager.targetSize, ng.openstackManager.targetSize+delta)
 	ng.openstackManager.targetSize += delta
@@ -130,10 +126,10 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 		return fmt.Errorf("could not increase cluster size: %v", err)
 	}
 
-	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
-	return ng.WaitForUpdateState(WaitForUpdateStatusTimeout)
+	// Block until cluster has gone into update status and then completed
+	ng.WaitForClusterStatus(ClusterStatusUpdateInProgress, WaitForUpdateStatusTimeout)
+	return ng.WaitForClusterStatus(ClusterStatusUpdateComplete, WaitForCompleteStatusTimout)
 }
-
 
 // Delete a set of nodes by removing them from the heat stack
 // and then scaling down the cluster to match the stack's new minion count.
@@ -168,12 +164,12 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	}
 	glog.Infof("Deleting nodes: %v", nodeNames)
 
-	canDelete, err := ng.openstackManager.CanUpdate()
+	updatePossible, currentStatus, err := ng.openstackManager.CanUpdate()
 	if err != nil {
 		return fmt.Errorf("could not check if cluster is ready to delete nodes: %v", err)
 	}
-	if !canDelete {
-		return fmt.Errorf("can not delete nodes, cluster is already updating")
+	if !updatePossible {
+		return fmt.Errorf("can not delete nodes, cluster is in %s status", currentStatus)
 	}
 
 	minionCount, err := ng.openstackManager.CurrentTotalNodes()
@@ -213,11 +209,10 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 		return fmt.Errorf("could not decrease cluster size: %v", err)
 	}
 
-	glog.Info("Waiting for cluster UPDATE_IN_PROGRESS")
-	// Keep holding the mutex lock so that the cluster status can change to UPDATE_IN_PROGRESS
-	return ng.WaitForUpdateState(WaitForUpdateStatusTimeout)
+	// Block until cluster has gone into update status and then completed
+	ng.WaitForClusterStatus(ClusterStatusUpdateInProgress, WaitForUpdateStatusTimeout)
+	return ng.WaitForClusterStatus(ClusterStatusUpdateComplete, WaitForCompleteStatusTimout)
 }
-
 
 func (ng *OpenstackNodeGroup) DecreaseTargetSize(delta int) error {
 	if delta >= 0 {
@@ -281,7 +276,6 @@ func (ng *OpenstackNodeGroup) MinSize() int {
 func (ng *OpenstackNodeGroup) TargetSize() (int, error) {
 	return ng.openstackManager.targetSize, nil
 }
-
 
 func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDiscoveryOptions, rl *cloudprovider.ResourceLimiter) cloudprovider.CloudProvider {
 	var config io.ReadCloser

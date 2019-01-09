@@ -21,31 +21,28 @@ import (
 	provider_os "k8s.io/kubernetes/pkg/cloudprovider/providers/openstack"
 )
 
-const (
-	StatusUpdateInProgress = "UPDATE_IN_PROGRESS"
+var StatusesPreventingUpdate = sets.NewString(
+	ClusterStatusUpdateInProgress,
+	ClusterStatusUpdateFailed,
 )
-
-var StatesPreventingUpdate = sets.NewString(StatusUpdateInProgress)
 
 type OpenstackManager struct {
 	clusterClient *gophercloud.ServiceClient
-	novaClient *gophercloud.ServiceClient
-	heatClient *gophercloud.ServiceClient
-	clusterName string
+	novaClient    *gophercloud.ServiceClient
+	heatClient    *gophercloud.ServiceClient
+	clusterName   string
 
 	stackName string
-	stackID string
+	stackID   string
 
 	UpdateMutex sync.Mutex
 
-	minSize int
-	maxSize int
+	minSize    int
+	maxSize    int
 	targetSize int
 
-
-	nodesToDelete []*apiv1.Node
+	nodesToDelete      []*apiv1.Node
 	nodesToDeleteMutex sync.Mutex
-
 }
 
 func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.NodeGroupDiscoveryOptions, opts config.AutoscalingOptions) (*OpenstackManager, error) {
@@ -90,9 +87,9 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 
 	manager := OpenstackManager{
 		clusterClient: clusterClient,
-		clusterName: opts.ClusterName,
-		novaClient: novaClient,
-		heatClient: heatClient,
+		clusterName:   opts.ClusterName,
+		novaClient:    novaClient,
+		heatClient:    heatClient,
 	}
 
 	manager.stackID, err = manager.GetStackID()
@@ -108,7 +105,7 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 }
 
 func toAuthOptsExt(cfg provider_os.Config) trusts.AuthOptsExt {
-	opts :=  gophercloud.AuthOptions{
+	opts := gophercloud.AuthOptions{
 		IdentityEndpoint: cfg.Global.AuthURL,
 		Username:         cfg.Global.Username,
 		UserID:           cfg.Global.UserID,
@@ -123,11 +120,10 @@ func toAuthOptsExt(cfg provider_os.Config) trusts.AuthOptsExt {
 	}
 
 	return trusts.AuthOptsExt{
-		TrustID: cfg.Global.TrustID,
+		TrustID:            cfg.Global.TrustID,
 		AuthOptionsBuilder: &opts,
 	}
 }
-
 
 func (osm *OpenstackManager) CurrentTotalNodes() (int, error) {
 	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
@@ -168,7 +164,6 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 	}
 
 	glog.Infof("%#v", clusterStackResources)*/
-
 
 	// I don't know what exactly should be returned in this.
 	// GKE has fmt.Sprintf("gce://%s/%s/%s", ref.Project, ref.Zone, ref.Name))
@@ -225,7 +220,6 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 	return []string{}, nil
 }
 
-
 // Deletes nodes by passing a comma separated list of names or IPs
 // of minions to remove to heat, and sets the new number of minions on the stack.
 func (osm *OpenstackManager) DeleteNodes(minionsToRemove string, updatedNodeCount int) error {
@@ -249,12 +243,12 @@ func (osm *OpenstackManager) GetClusterStatus() (string, error) {
 	return cluster.Status, nil
 }
 
-func (osm *OpenstackManager) CanUpdate() (bool, error) {
+func (osm *OpenstackManager) CanUpdate() (bool, string, error) {
 	clusterStatus, err := osm.GetClusterStatus()
 	if err != nil {
-		return false, fmt.Errorf("could not get cluster update ability: %v", err)
+		return false, "", fmt.Errorf("could not get cluster update ability: %v", err)
 	}
-	return !StatesPreventingUpdate.Has(clusterStatus), nil
+	return !StatusesPreventingUpdate.Has(clusterStatus), clusterStatus, nil
 }
 
 func (osm *OpenstackManager) GetStackStatus() (string, error) {

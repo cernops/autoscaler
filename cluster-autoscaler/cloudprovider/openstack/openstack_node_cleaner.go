@@ -1,13 +1,13 @@
 package openstack
 
 import (
-	kube_client "k8s.io/client-go/kubernetes"
-	"net/url"
-	"k8s.io/autoscaler/cluster-autoscaler/config"
-	"k8s.io/klog/glog"
-	"k8s.io/client-go/rest"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/autoscaler/cluster-autoscaler/config"
+	kube_client "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/klog/glog"
+	"net/url"
 	"strings"
 )
 
@@ -45,6 +45,15 @@ func cleanupNodes(kubeClient *kube_client.Clientset, nodeNames []string) error {
 	}
 	if len(failedDeletions) > 0 {
 		return fmt.Errorf("could not clean up one or more scaled down nodes: %s", strings.Join(failedDeletions, ", "))
+	}
+	return nil
+}
+
+
+func checkNodesAccess(kubeClient *kube_client.Clientset) error {
+	_, err := kubeClient.CoreV1().Nodes().List(metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("could not list nodes: %v", err)
 	}
 	return nil
 }

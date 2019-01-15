@@ -330,6 +330,12 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 		glog.Fatalf("Openstack autoscaler only supports a single nodegroup for now")
 	}
 
+	kubeClient := makeKubeClient()
+	err = checkNodesAccess(kubeClient)
+	if err != nil {
+		glog.Fatalf("kubeClient auth error: %v", err)
+	}
+
 	for _, nodegroupSpec := range do.NodeGroupSpecs {
 		spec, err := dynamic.SpecFromString(nodegroupSpec, true)
 		if err != nil {

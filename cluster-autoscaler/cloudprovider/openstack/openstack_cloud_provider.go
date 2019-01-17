@@ -91,6 +91,8 @@ type OpenstackNodeGroup struct {
 	kubeClient *kube_client.Clientset
 }
 
+// WaitForClusterStatus checks once per second to see if the cluster has entered a given status.
+// Returns when the status is observed or the timeout is reached.
 func (ng *OpenstackNodeGroup) WaitForClusterStatus(status string, timeout time.Duration) error {
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
 		clusterStatus, err := ng.openstackManager.GetClusterStatus()
@@ -105,8 +107,9 @@ func (ng *OpenstackNodeGroup) WaitForClusterStatus(status string, timeout time.D
 	return fmt.Errorf("timeout waiting for %s status", status)
 }
 
-// Increases the number of nodes by replacing the cluster's node_count.
-// Takes precautions so that the cluster is not modified while in an UPDATE_IN_PROGRESS state.
+// IncreaseSize increases the number of nodes by replacing the cluster's node_count.
+// Takes precautions so that the cluster is not modified while in
+// an UPDATE_IN_PROGRESS state.
 func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	ng.openstackManager.UpdateMutex.Lock()
 	defer ng.openstackManager.UpdateMutex.Unlock()
@@ -141,10 +144,13 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	return nil
 }
 
-// Delete a set of nodes by removing them from the heat stack
+// DeleteNodes deletes a set of nodes by removing them from the heat stack
 // and then scaling down the cluster to match the stack's new minion count.
 // Takes precautions so that the cluster/stack are not modified while in
 // an UPDATE_IN_PROGRESS state.
+//
+// Simultaneous but separate calls from the autoscaler to delete
+// multiple nodes are batched together to scale down as quickly as possible.
 func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 
 	// Attempt at batching simultaneous deletes on individual nodes
@@ -195,8 +201,6 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 				break
 			}
 		}
-
-
 	}
 
 	minionsToRemove := strings.Join(minionIPs, ",")
@@ -235,6 +239,9 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	return cleanupNodes(ng.kubeClient, nodeNames)
 }
 
+// DecreaseTargetSize decreases the cluster node_count in magnum.
+// Should be used after removing specific nodes via heat,
+// only to correct the node count in magnum to match the heat stack.
 func (ng *OpenstackNodeGroup) DecreaseTargetSize(delta int) error {
 	if delta >= 0 {
 		return fmt.Errorf("size decrease must be negative")

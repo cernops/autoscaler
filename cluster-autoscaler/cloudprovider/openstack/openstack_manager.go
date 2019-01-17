@@ -133,6 +133,7 @@ func (osm *OpenstackManager) CurrentTotalNodes() (int, error) {
 	return cluster.NodeCount, nil
 }
 
+// UpdateNodeCount replaces the cluster node_count in magnum.
 func (osm *OpenstackManager) UpdateNodeCount(nodes int) error {
 	cluster, err := clusters.Get(osm.clusterClient, osm.clusterName).Extract()
 	if err != nil {
@@ -220,8 +221,8 @@ func (osm *OpenstackManager) GetNodes() ([]string, error) {
 	return []string{}, nil
 }
 
-// Deletes nodes by passing a comma separated list of names or IPs
-// of minions to remove to heat, and sets the new number of minions on the stack.
+// DeleteNodes deletes nodes by passing a comma separated list of names or IPs
+// of minions to remove to heat, and simultaneously sets the new number of minions on the stack.
 func (osm *OpenstackManager) DeleteNodes(minionsToRemove string, updatedNodeCount int) error {
 	updateOpts := stacks.UpdateOpts{
 		Parameters: map[string]interface{}{
@@ -243,6 +244,9 @@ func (osm *OpenstackManager) GetClusterStatus() (string, error) {
 	return cluster.Status, nil
 }
 
+// CanUpdate checks if the cluster status is present in a set of statuses that
+// prevent the cluster from being updated.
+// Returns if updating is possible and the status for convenience.
 func (osm *OpenstackManager) CanUpdate() (bool, string, error) {
 	clusterStatus, err := osm.GetClusterStatus()
 	if err != nil {
@@ -259,8 +263,9 @@ func (osm *OpenstackManager) GetStackStatus() (string, error) {
 	return stack.Status, nil
 }
 
-// Wait for heat stack to change to a given status
-// Takes a timeout as an argument because it should be different depending on the status
+// WaitForStackStatus checks once per second to see if the heat stack has entered a given status.
+// waits for heat stack to change to a given status.
+// Returns when the status is observed or the timeout is reached.
 func (osm *OpenstackManager) WaitForStackStatus(status string, timeout time.Duration) error {
 	glog.Infof("Waiting for stack status %s", status)
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {

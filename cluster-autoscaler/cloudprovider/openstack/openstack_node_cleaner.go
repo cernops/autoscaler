@@ -29,8 +29,9 @@ func getKubeConfig() *rest.Config {
 	return kubeConfig
 }
 
-// Removes a set of nodes from the kubernetes node list.
-// Attempts to remove all nodes and returns an error at the end if any removals failed.
+// cleanupNodes removes a set of nodes from the kubernetes node list.
+// Attempts to remove all nodes in the list and returns an error
+// at the end if any removals failed.
 func cleanupNodes(kubeClient *kube_client.Clientset, nodeNames []string) error {
 	failedDeletions := []string{}
 	for _, nodeName := range nodeNames {

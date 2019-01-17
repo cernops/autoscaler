@@ -70,17 +70,17 @@ func CreateOpenstackManager(configReader io.Reader, discoverOpts cloudprovider.N
 		return nil, fmt.Errorf("could not authenticate: %v", err)
 	}
 
-	clusterClient, err := openstack.NewContainerInfraV1(provider, gophercloud.EndpointOpts{Type: "container-infra", Name: "magnum", Region: "cern"})
+	clusterClient, err := openstack.NewContainerInfraV1(provider, gophercloud.EndpointOpts{Type: "container-infra", Name: "magnum", Region: cfg.Global.Region})
 	if err != nil {
 		return nil, fmt.Errorf("could not create container-infra client: %v", err)
 	}
 
-	novaClient, err := openstack.NewComputeV2(provider, gophercloud.EndpointOpts{Type: "compute", Name: "nova", Region: "cern"})
+	novaClient, err := openstack.NewComputeV2(provider, gophercloud.EndpointOpts{Type: "compute", Name: "nova", Region: cfg.Global.Region})
 	if err != nil {
 		return nil, fmt.Errorf("could not create compute client: %v", err)
 	}
 
-	heatClient, err := openstack.NewOrchestrationV1(provider, gophercloud.EndpointOpts{Type: "orchestration", Name: "heat", Region: "cern"})
+	heatClient, err := openstack.NewOrchestrationV1(provider, gophercloud.EndpointOpts{Type: "orchestration", Name: "heat", Region: cfg.Global.Region})
 	if err != nil {
 		return nil, fmt.Errorf("could not create orchestration client: %v", err)
 	}

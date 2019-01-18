@@ -33,3 +33,11 @@ to match your cluster.
 | --cluster-name   | The name of your Magnum cluster. If there are multiple clusters sharing the same name then the cluster IDs should be used instead.   |
 | --cloud-provider | Can be omitted if the autoscaler is built with `BUILD_TAGS=openstack`.                                                               |
 | --nodes          | Of the form `min:max:NodegroupName`. Nodegroups are not yet implemented in Magnum so only a single nodegroup is supported currently. |
+
+## Notes
+
+The autoscaler will not remove nodes which have non-default kube-system pods.
+This prevents the node that the autoscaler is running on from being scaled down.
+If you are deploying the autoscaler into a cluster which already has more than one node,
+it is best to deploy it onto any node which already has non-default kube-system pods,
+to minimise the number of nodes which cannot be removed when scaling.

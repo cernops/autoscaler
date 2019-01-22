@@ -34,7 +34,6 @@ var StatusesPreventingUpdate = sets.NewString(
 // delete the specific nodes that the autoscaler has picked for removal.
 type OpenstackManagerHeat struct {
 	clusterClient *gophercloud.ServiceClient
-	novaClient    *gophercloud.ServiceClient
 	heatClient    *gophercloud.ServiceClient
 	clusterName   string
 
@@ -72,11 +71,6 @@ func CreateOpenstackManagerHeat(configReader io.Reader, discoverOpts cloudprovid
 		return nil, fmt.Errorf("could not create container-infra client: %v", err)
 	}
 
-	novaClient, err := openstack.NewComputeV2(provider, gophercloud.EndpointOpts{Type: "compute", Name: "nova", Region: cfg.Global.Region})
-	if err != nil {
-		return nil, fmt.Errorf("could not create compute client: %v", err)
-	}
-
 	heatClient, err := openstack.NewOrchestrationV1(provider, gophercloud.EndpointOpts{Type: "orchestration", Name: "heat", Region: cfg.Global.Region})
 	if err != nil {
 		return nil, fmt.Errorf("could not create orchestration client: %v", err)
@@ -85,7 +79,6 @@ func CreateOpenstackManagerHeat(configReader io.Reader, discoverOpts cloudprovid
 	manager := OpenstackManagerHeat{
 		clusterClient: clusterClient,
 		clusterName:   opts.ClusterName,
-		novaClient:    novaClient,
 		heatClient:    heatClient,
 	}
 

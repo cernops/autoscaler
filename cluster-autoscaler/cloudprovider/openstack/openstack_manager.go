@@ -12,7 +12,7 @@ const (
 	DefaultManager = "heat"
 )
 
-// OpenstackManager is an interface representing the
+// OpenstackManager is an interface for the basic interactions with the cluster.
 type OpenstackManager interface {
 	CurrentTotalNodes() (int, error)
 	UpdateNodeCount(nodes int) error

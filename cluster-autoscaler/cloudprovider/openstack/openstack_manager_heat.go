@@ -17,19 +17,29 @@ import (
 	provider_os "k8s.io/kubernetes/pkg/cloudprovider/providers/openstack"
 )
 
+const (
+	StackStatusUpdateInProgress = "UPDATE_IN_PROGRESS"
+	StackStatusUpdateComplete = "UPDATE_COMPLETE"
+)
+
 var StatusesPreventingUpdate = sets.NewString(
 	ClusterStatusUpdateInProgress,
 	ClusterStatusUpdateFailed,
 )
 
+// OpenstackManagerHeat implements the OpenstackManager interface.
+//
+// Most interactions with the cluster are done directly with magnum,
+// but scaling down requires an intermediate step using heat to
+// delete the specific nodes that the autoscaler has picked for removal.
 type OpenstackManagerHeat struct {
-	clusterClient *gophercloud.ServiceClient //stay
-	novaClient    *gophercloud.ServiceClient //stay
-	heatClient    *gophercloud.ServiceClient // stay
+	clusterClient *gophercloud.ServiceClient
+	novaClient    *gophercloud.ServiceClient
+	heatClient    *gophercloud.ServiceClient
 	clusterName   string
 
-	stackName string //stay
-	stackID   string //stay
+	stackName string
+	stackID   string
 }
 
 func CreateOpenstackManagerHeat(configReader io.Reader, discoverOpts cloudprovider.NodeGroupDiscoveryOptions, opts config.AutoscalingOptions) (*OpenstackManagerHeat, error) {
@@ -184,7 +194,7 @@ func (osm *OpenstackManagerHeat) GetNodes() ([]string, error) {
 
 // DeleteNodes deletes nodes by passing a comma separated list of names or IPs
 // of minions to remove to heat, and simultaneously sets the new number of minions on the stack.
-// Returns updated node count.
+// The magnum node_count is then set to the new value (does not cause any more nodes to be removed).
 func (osm *OpenstackManagerHeat) DeleteNodes(minionsToRemove string, updatedNodeCount int) (int, error) {
 	updateOpts := stacks.UpdateOpts{
 		Parameters: map[string]interface{}{
@@ -199,14 +209,14 @@ func (osm *OpenstackManagerHeat) DeleteNodes(minionsToRemove string, updatedNode
 		return 0, fmt.Errorf("stack patch failed: %v", err)
 	}
 
-	// Wait for the stack to do it's thing before updating the cluster node_count
-	err = osm.WaitForStackStatus("UPDATE_IN_PROGRESS", WaitForUpdateStatusTimeout)
+	// Wait for the stack to do its thing before updating the cluster node_count
+	err = osm.WaitForStackStatus(StackStatusUpdateInProgress, WaitForUpdateStatusTimeout)
 	if err != nil {
-		return 0, fmt.Errorf("error waiting for stack UPDATE_IN_PROGRESS: %v", err)
+		return 0, fmt.Errorf("error waiting for stack %s status: %v", StackStatusUpdateInProgress, err)
 	}
-	err = osm.WaitForStackStatus("UPDATE_COMPLETE", WaitForCompleteStatusTimout)
+	err = osm.WaitForStackStatus(StackStatusUpdateComplete, WaitForCompleteStatusTimout)
 	if err != nil {
-		return 0, fmt.Errorf("error waiting for stack UPDATE_COMPLETE: %v", err)
+		return 0, fmt.Errorf("error waiting for stack %s status: %v", StackStatusUpdateComplete, err)
 	}
 
 	err = osm.UpdateNodeCount(updatedNodeCount)

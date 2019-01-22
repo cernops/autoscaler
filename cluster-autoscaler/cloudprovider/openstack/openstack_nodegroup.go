@@ -48,8 +48,9 @@ func (ng *OpenstackNodeGroup) WaitForClusterStatus(status string, timeout time.D
 }
 
 // IncreaseSize increases the number of nodes by replacing the cluster's node_count.
-// Takes precautions so that the cluster is not modified while in
-// an UPDATE_IN_PROGRESS state.
+//
+// Takes precautions so that the cluster is not modified while in  an UPDATE_IN_PROGRESS state.
+// Blocks until the cluster has reached UPDATE_COMPLETE.
 func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	ng.clusterUpdateMutex.Lock()
 	defer ng.clusterUpdateMutex.Unlock()
@@ -84,13 +85,13 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	return nil
 }
 
-// DeleteNodes deletes a set of nodes by removing them from the heat stack
-// and then scaling down the cluster to match the stack's new minion count.
-// Takes precautions so that the cluster/stack are not modified while in
-// an UPDATE_IN_PROGRESS state.
+// DeleteNodes deletes a set of nodes chosen by the autoscaler.
 //
-// Simultaneous but separate calls from the autoscaler to delete
-// multiple nodes are batched together to scale down as quickly as possible.
+// The process of deletion depends on the implementation of OpenstackManager,
+// but this function handles what should be common between all implementations:
+//   - simultaneous but separate calls from the autoscaler are batched together
+//   - does not allow scaling while the cluster is already in an UPDATE_IN_PROGRESS state
+//   - after scaling down, blocks until the cluster has reached UPDATE_COMPLETE
 func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 
 	// Attempt at batching simultaneous deletes on individual nodes
@@ -167,8 +168,6 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 }
 
 // DecreaseTargetSize decreases the cluster node_count in magnum.
-// Should be used after removing specific nodes via heat,
-// only to correct the node count in magnum to match the heat stack.
 func (ng *OpenstackNodeGroup) DecreaseTargetSize(delta int) error {
 	if delta >= 0 {
 		return fmt.Errorf("size decrease must be negative")

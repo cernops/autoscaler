@@ -16,6 +16,9 @@ const (
 
 	WaitForUpdateStatusTimeout  = 30 * time.Second
 	WaitForCompleteStatusTimout = 10 * time.Minute
+
+	// Could move to property of OpenstackManager implementations if needed
+	scaleToZeroSupported = true
 )
 
 func toAuthOptsExt(cfg provider_os.Config) trusts.AuthOptsExt {

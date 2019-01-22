@@ -123,7 +123,7 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 	clusterUpdateLock := sync.Mutex{}
 
 	for _, nodegroupSpec := range do.NodeGroupSpecs {
-		spec, err := dynamic.SpecFromString(nodegroupSpec, true)
+		spec, err := dynamic.SpecFromString(nodegroupSpec, scaleToZeroSupported)
 		if err != nil {
 			glog.Fatalf("Could not parse node group spec %s: %v", nodegroupSpec, err)
 		}

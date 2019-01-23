@@ -17,6 +17,8 @@ const (
 	ProviderName = "openstack"
 )
 
+
+// OpenstackNodeGroup implements CloudProvider interface from cluster-autoscaler/cloudprovider module.
 type openstackCloudProvider struct {
 	openstackManager *OpenstackManager
 	resourceLimiter  *cloudprovider.ResourceLimiter

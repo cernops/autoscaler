@@ -12,7 +12,11 @@ import (
 	"sync"
 )
 
-
+// OpenstackNodeGroup implements NodeGroup interface from cluster-autoscaler/cloudprovider module.
+//
+// Represents a homogeneous collection of nodes within a cluster,
+// which can be dynamically resized between a minimum and maximum
+// number of nodes.
 type OpenstackNodeGroup struct {
 	openstackManager OpenstackManager
 	id               string

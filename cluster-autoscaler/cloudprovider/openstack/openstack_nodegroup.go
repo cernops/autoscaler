@@ -27,8 +27,8 @@ type OpenstackNodeGroup struct {
 	clusterUpdateMutex *sync.Mutex
 
 	// Stored as pointers so that when autoscaler copies the nodegroup it can still update the target size
-	minSize *int
-	maxSize *int
+	minSize int
+	maxSize int
 	targetSize *int
 
 	nodesToDelete      []*apiv1.Node
@@ -186,7 +186,7 @@ func (ng *OpenstackNodeGroup) Id() string {
 }
 
 func (ng *OpenstackNodeGroup) Debug() string {
-	return fmt.Sprintf("%s min=%d max=%d target=%d", ng.id, *ng.minSize, *ng.maxSize, *ng.targetSize)
+	return fmt.Sprintf("%s min=%d max=%d target=%d", ng.id, ng.minSize, ng.maxSize, *ng.targetSize)
 }
 
 func (ng *OpenstackNodeGroup) Nodes() ([]cloudprovider.Instance, error) {
@@ -222,13 +222,11 @@ func (ng *OpenstackNodeGroup) Autoprovisioned() bool {
 }
 
 func (ng *OpenstackNodeGroup) MaxSize() int {
-	//glog.Infof("Calling MaxSize(), getting %d", ng.maxSize)
-	return *ng.maxSize
+	return ng.maxSize
 }
 
 func (ng *OpenstackNodeGroup) MinSize() int {
-	//glog.Infof("Calling MinSize(), getting %d", ng.minSize)
-	return *ng.minSize
+	return ng.minSize
 }
 
 func (ng *OpenstackNodeGroup) TargetSize() (int, error) {

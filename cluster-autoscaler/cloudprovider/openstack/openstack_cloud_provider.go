@@ -135,8 +135,8 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 			id:               spec.Name,
 			kubeClient:       makeKubeClient(),
 			clusterUpdateMutex: &clusterUpdateLock,
-			minSize: &spec.MinSize,
-			maxSize: &spec.MaxSize,
+			minSize: spec.MinSize,
+			maxSize: spec.MaxSize,
 			targetSize: new(int),
 		}
 		*ng.targetSize, err = ng.openstackManager.CurrentTotalNodes()

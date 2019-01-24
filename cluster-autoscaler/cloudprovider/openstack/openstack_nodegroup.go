@@ -5,7 +5,6 @@ import (
 	"github.com/golang/glog"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
-	kube_client "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/pkg/scheduler/cache"
 	"strings"
 	"time"
@@ -21,7 +20,7 @@ type OpenstackNodeGroup struct {
 	openstackManager OpenstackManager
 	id               string
 
-	kubeClient *kube_client.Clientset
+	nodeCleaner NodeCleanerInterface
 
 
 	clusterUpdateMutex *sync.Mutex
@@ -63,6 +62,15 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	if delta <= 0 {
 		return fmt.Errorf("size increase must be positive")
 	}
+
+	size, err := ng.openstackManager.CurrentTotalNodes()
+	if err != nil {
+		return fmt.Errorf("could not check current nodegroup size: %v", err)
+	}
+	if size+delta > ng.MaxSize() {
+		return fmt.Errorf("size increase too large, desired:%d max:%d", size+delta, ng.MaxSize())
+	}
+
 	updatePossible, currentStatus, err := ng.openstackManager.CanUpdate()
 	if err != nil {
 		return fmt.Errorf("can not increase node count: %v", err)
@@ -139,6 +147,10 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 		return fmt.Errorf("could not get current node count")
 	}
 
+	if minionCount-len(nodes) < ng.MinSize() {
+		return fmt.Errorf("size decrease too large, desired:%d min:%d", minionCount-len(nodes), ng.MinSize())
+	}
+
 	var minionIPs []string
 	for _, node := range nodes {
 		for _, addr := range node.Status.Addresses {
@@ -169,7 +181,7 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	}
 
 	// Delete nodes from kubernetes node list after scale down is complete
-	return cleanupNodes(ng.kubeClient, nodeNames)
+	return ng.nodeCleaner.CleanupNodes(nodeNames)
 }
 
 // DecreaseTargetSize decreases the cluster node_count in magnum.

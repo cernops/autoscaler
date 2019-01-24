@@ -115,9 +115,14 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 	}
 
 	kubeClient := makeKubeClient()
-	err = checkNodesAccess(kubeClient)
+
+	nodeCleaner := &NodeCleaner{
+		kubeClient: kubeClient,
+	}
+
+	err = nodeCleaner.CheckNodesAccess()
 	if err != nil {
-		glog.Fatalf("kubeClient auth error: %v", err)
+		glog.Fatalf("nodeCleaner auth error: %v", err)
 	}
 
 
@@ -132,7 +137,7 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 		ng := OpenstackNodeGroup{
 			openstackManager: manager,
 			id:               spec.Name,
-			kubeClient:       makeKubeClient(),
+			nodeCleaner:      nodeCleaner,
 			clusterUpdateMutex: &clusterUpdateLock,
 			minSize: spec.MinSize,
 			maxSize: spec.MaxSize,

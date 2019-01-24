@@ -26,7 +26,6 @@ type openstackCloudProvider struct {
 }
 
 func BuildOpenstackCloudProvider(openstackManager OpenstackManager, resourceLimiter *cloudprovider.ResourceLimiter) (cloudprovider.CloudProvider, error) {
-	glog.Info("Building openstack cloud provider")
 	os := &openstackCloudProvider{
 		openstackManager: &openstackManager,
 		resourceLimiter:  resourceLimiter,
@@ -73,7 +72,7 @@ func (os *openstackCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceL
 }
 
 func (os *openstackCloudProvider) Refresh() error {
-	glog.Infof(os.nodeGroups[0].Debug())
+	glog.V(3).Infof(os.nodeGroups[0].Debug())
 	return nil
 }
 

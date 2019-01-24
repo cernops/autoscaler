@@ -38,13 +38,14 @@ type OpenstackNodeGroup struct {
 // WaitForClusterStatus checks once per second to see if the cluster has entered a given status.
 // Returns when the status is observed or the timeout is reached.
 func (ng *OpenstackNodeGroup) WaitForClusterStatus(status string, timeout time.Duration) error {
+	glog.V(2).Infof("Waiting for cluster %s status", status)
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
 		clusterStatus, err := ng.openstackManager.GetClusterStatus()
 		if err != nil {
 			return fmt.Errorf("error waiting for %s status: %v", status, err)
 		}
 		if clusterStatus == status {
-			glog.Infof("Waited for cluster %s status, took %d seconds", status, int(time.Since(start).Seconds()))
+			glog.V(0).Infof("Waited for cluster %s status, took %d seconds", status, int(time.Since(start).Seconds()))
 			return nil
 		}
 	}
@@ -69,7 +70,7 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 	if !updatePossible {
 		return fmt.Errorf("can not add nodes, cluster is in %s status", currentStatus)
 	}
-	glog.Infof("Increasing size by %d, %d->%d", delta, *ng.targetSize, *ng.targetSize+delta)
+	glog.V(0).Infof("Increasing size by %d, %d->%d", delta, *ng.targetSize, *ng.targetSize+delta)
 	*ng.targetSize += delta
 
 	err = ng.openstackManager.UpdateNodeCount(*ng.targetSize)
@@ -123,7 +124,7 @@ func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 	for _, node := range nodes {
 		nodeNames = append(nodeNames, node.Name)
 	}
-	glog.Infof("Deleting nodes: %v", nodeNames)
+	glog.V(1).Infof("Deleting nodes: %v", nodeNames)
 
 	updatePossible, currentStatus, err := ng.openstackManager.CanUpdate()
 	if err != nil {
@@ -176,7 +177,7 @@ func (ng *OpenstackNodeGroup) DecreaseTargetSize(delta int) error {
 	if delta >= 0 {
 		return fmt.Errorf("size decrease must be negative")
 	}
-	glog.Infof("Decreasing target size by %d, %d->%d", delta, *ng.targetSize, *ng.targetSize+delta)
+	glog.V(0).Infof("Decreasing target size by %d, %d->%d", delta, *ng.targetSize, *ng.targetSize+delta)
 	*ng.targetSize += delta
 	return ng.openstackManager.UpdateNodeCount(*ng.targetSize)
 }

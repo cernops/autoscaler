@@ -33,16 +33,16 @@ func getKubeConfig() *rest.Config {
 // Attempts to remove all nodes in the list and returns an error
 // at the end if any removals failed.
 func cleanupNodes(kubeClient *kube_client.Clientset, nodeNames []string) error {
+	glog.V(2).Info("Removing nodes from kubernetes node list")
 	failedDeletions := []string{}
 	for _, nodeName := range nodeNames {
-		glog.Infof("cleaning up node %s", nodeName)
+		glog.V(3).Infof("Cleaning up node %s", nodeName)
 		err := kubeClient.CoreV1().Nodes().Delete(nodeName, &metav1.DeleteOptions{})
 		if err != nil {
 			glog.Errorf("Failed to remove node %s from kubernetes node list: %v", nodeName, err)
 			failedDeletions = append(failedDeletions, nodeName)
 			continue
 		}
-		glog.Infof("finished cleaning up node %s", nodeName)
 	}
 	if len(failedDeletions) > 0 {
 		return fmt.Errorf("could not clean up one or more scaled down nodes: %s", strings.Join(failedDeletions, ", "))

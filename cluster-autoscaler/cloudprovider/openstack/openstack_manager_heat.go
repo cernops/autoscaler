@@ -250,14 +250,14 @@ func (osm *OpenstackManagerHeat) GetStackStatus() (string, error) {
 // waits for heat stack to change to a given status.
 // Returns when the status is observed or the timeout is reached.
 func (osm *OpenstackManagerHeat) WaitForStackStatus(status string, timeout time.Duration) error {
-	glog.Infof("Waiting for stack %s status", status)
+	glog.V(2).Infof("Waiting for stack %s status", status)
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
 		currentStatus, err := osm.GetStackStatus()
 		if err != nil {
 			return fmt.Errorf("error waiting for stack status: %v", err)
 		}
 		if currentStatus == status {
-			glog.Infof("Waited for stack %s status, took %d seconds", status, int(time.Since(start).Seconds()))
+			glog.V(0).Infof("Waited for stack %s status, took %d seconds", status, int(time.Since(start).Seconds()))
 			return nil
 		}
 		time.Sleep(time.Second)

@@ -6,7 +6,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/config"
 	kube_client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog/glog"
+	"github.com/golang/glog"
 	"net/url"
 	"strings"
 )

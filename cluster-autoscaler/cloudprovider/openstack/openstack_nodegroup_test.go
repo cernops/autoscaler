@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"strings"
 )
 
 type OpenstackManagerMock struct {
@@ -19,11 +20,11 @@ type OpenstackManagerMock struct {
 
 func (m *OpenstackManagerMock) CurrentTotalNodes() (int, error) {
 	args := m.Called()
-	return args.Get(0).(int), args.Error(1)
+	return args.Int(0), args.Error(1)
 }
 
 func (m *OpenstackManagerMock) UpdateNodeCount(nodes int) error {
-	args := m.Called()
+	args := m.Called(nodes)
 	return args.Error(0)
 }
 
@@ -33,18 +34,18 @@ func (m *OpenstackManagerMock) GetNodes() ([]string, error) {
 }
 
 func (m *OpenstackManagerMock) DeleteNodes(minionsToRemove string, updatedNodeCount int) (int, error) {
-	args := m.Called()
-	return args.Get(0).(int), args.Error(1)
+	args := m.Called(minionsToRemove, updatedNodeCount)
+	return args.Int(0), args.Error(1)
 }
 
 func (m *OpenstackManagerMock) GetClusterStatus() (string, error) {
 	args := m.Called()
-	return args.Get(0).(string), args.Error(1)
+	return args.String(0), args.Error(1)
 }
 
 func (m *OpenstackManagerMock) CanUpdate() (bool, string, error) {
 	args := m.Called()
-	return args.Get(0).(bool), args.Get(1).(string), args.Error(2)
+	return args.Bool(0), args.String(1), args.Error(2)
 }
 
 
@@ -58,7 +59,7 @@ func (nc *NodeCleanerMock) CheckNodesAccess() error {
 }
 
 func (nc *NodeCleanerMock) CleanupNodes(nodeNames []string) error {
-	args := nc.Called()
+	args := nc.Called(nodeNames)
 	return args.Error(0)
 }
 
@@ -105,7 +106,7 @@ func TestIncreaseSize(t *testing.T) {
 	// Test all working normally
 	manager.On("CurrentTotalNodes").Return(1, nil).Once()
 	manager.On("CanUpdate").Return(true, "", nil).Once()
-	manager.On("UpdateNodeCount").Return(nil).Once()
+	manager.On("UpdateNodeCount", 2).Return(nil).Once()
 	manager.On("GetClusterStatus").Return(ClusterStatusUpdateInProgress, nil).Once()
 	manager.On("GetClusterStatus").Return(ClusterStatusUpdateComplete, nil).Once()
 	err := ng.IncreaseSize(1)
@@ -149,22 +150,23 @@ func TestIncreaseSize(t *testing.T) {
 	assert.Equal(t, "can not increase node count: manager error", err.Error())
 
 	// Test update node count fails
+	*ng.targetSize = 1
 	manager.On("CurrentTotalNodes").Return(1, nil).Once()
 	manager.On("CanUpdate").Return(true, "", nil).Once()
-	manager.On("UpdateNodeCount").Return(errors.New("manager error")).Once()
+	manager.On("UpdateNodeCount", 2).Return(errors.New("manager error")).Once()
 	err = ng.IncreaseSize(1)
 	assert.Error(t, err)
 	assert.Equal(t, "could not increase cluster size: manager error", err.Error())
 }
 
-func TestDeleteNodes(t *testing.T) {
-	manager := &OpenstackManagerMock{}
-	nodeCleaner := &NodeCleanerMock{}
-	ng := CreateTestNodegroup(manager)
-	ng.nodeCleaner = nodeCleaner
-	*ng.targetSize = 10
 
-	var nodesToDelete []*apiv1.Node
+
+
+var nodesToDelete []*apiv1.Node
+var joinedIPs string
+var nameList []string
+
+func init() {
 	for i := 1; i <= 5; i++ {
 		node := apiv1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -181,21 +183,106 @@ func TestDeleteNodes(t *testing.T) {
 		}
 
 		nodesToDelete = append(nodesToDelete, &node)
+		nameList = append(nameList, node.ObjectMeta.Name)
 	}
+
+	IPs := []string{}
+	for _, node := range nodesToDelete {
+		IPs = append(IPs, node.Status.Addresses[0].Address)
+	}
+	joinedIPs = strings.Join(IPs, ",")
+}
+
+func TestDeleteNodes(t *testing.T) {
+	manager := &OpenstackManagerMock{}
+	nodeCleaner := &NodeCleanerMock{}
+	ng := CreateTestNodegroup(manager)
+	ng.nodeCleaner = nodeCleaner
+	*ng.targetSize = 10
 
 	// Test all working normally
 	manager.On("CanUpdate").Return(true, "", nil).Once()
-	manager.On("CurrentTotalNodes").Return(10, nil)
-	manager.On("DeleteNodes").Return(5, nil)
+	manager.On("CurrentTotalNodes").Return(10, nil).Once()
+	manager.On("DeleteNodes", joinedIPs, 5).Return(5, nil).Once()
 	manager.On("GetClusterStatus").Return(ClusterStatusUpdateInProgress, nil).Once()
 	manager.On("GetClusterStatus").Return(ClusterStatusUpdateComplete, nil).Once()
-	nodeCleaner.On("CleanupNodes").Return(nil)
+	nodeCleaner.On("CleanupNodes", nameList).Return(nil).Once()
 	err := ng.DeleteNodes(nodesToDelete)
 	assert.NoError(t, err)
 	assert.Equal(t, 5, *ng.targetSize)
+}
 
-	// to test batching
-	// Can let the goroutine DeleteNode calls fail after they add to the batch group
-	// go func() { time.Sleep(0.5); ng.DeleteNodes(node2); ng.DeleteNodes(node3) }
-	// ng.DeleteNodes(node1)
+func TestDeleteNodesBatching(t *testing.T) {
+	manager := &OpenstackManagerMock{}
+	nodeCleaner := &NodeCleanerMock{}
+	ng := CreateTestNodegroup(manager)
+	ng.nodeCleaner = nodeCleaner
+	*ng.targetSize = 10
+
+	// Test all working normally
+	manager.On("CanUpdate").Return(true, "", nil).Once()
+	manager.On("CurrentTotalNodes").Return(10, nil).Once()
+	manager.On("DeleteNodes", joinedIPs, 5).Return(5, nil).Once()
+	manager.On("GetClusterStatus").Return(ClusterStatusUpdateInProgress, nil).Once()
+	manager.On("GetClusterStatus").Return(ClusterStatusUpdateComplete, nil).Once()
+	nodeCleaner.On("CleanupNodes", nameList).Return(nil).Once()
+
+	go func() {
+		time.Sleep(time.Second)
+		err := ng.DeleteNodes(nodesToDelete[3:5])
+		assert.NoError(t, err, "Delete call that should have been batched did not return nil")
+	}()
+
+	err := ng.DeleteNodes(nodesToDelete[0:3])
+	assert.NoError(t, err)
+	assert.Equal(t, 5, *ng.targetSize)
+	manager.AssertExpectations(t)
+}
+
+func TestDeleteNodesBelowMin(t *testing.T) {
+	manager := &OpenstackManagerMock{}
+	nodeCleaner := &NodeCleanerMock{}
+	ng := CreateTestNodegroup(manager)
+	ng.nodeCleaner = nodeCleaner
+	ng.minSize = 8
+	*ng.targetSize = 10
+
+	// Try to batch 5 nodes for deletion when minSize only allows for two to be deleted
+
+	var twoIPs []string
+	var twoJoinedIPs string
+	var twoNames []string
+
+	for i := 0; i < 2; i++ {
+		twoIPs = append(twoIPs, nodesToDelete[i].Status.Addresses[0].Address)
+		twoNames = append(twoNames, nodesToDelete[i].ObjectMeta.Name)
+	}
+	twoJoinedIPs = strings.Join(twoIPs, ",")
+
+	manager.On("CanUpdate").Return(true, "", nil).Once()
+	manager.On("CurrentTotalNodes").Return(10, nil).Once()
+	manager.On("DeleteNodes", twoJoinedIPs, 8).Return(5, nil).Once()
+	manager.On("GetClusterStatus").Return(ClusterStatusUpdateInProgress, nil).Once()
+	manager.On("GetClusterStatus").Return(ClusterStatusUpdateComplete, nil).Once()
+	nodeCleaner.On("CleanupNodes", twoNames).Return(nil).Once()
+
+	for i := 1; i < 5; i++ {
+		go func(i int) {
+			// Wait and preserve order
+			time.Sleep(time.Second + 100*time.Millisecond*time.Duration(i))
+			err := ng.DeleteNodes(nodesToDelete[i:i+1])
+			if i == 1 {
+				// One node should be added to the batch
+				assert.NoError(t, err, "Delete call that should have been batched did not return nil")
+			} else {
+				// The rest should fail
+				assert.Error(t, err)
+				assert.Equal(t, "deleting nodes would take nodegroup below minimum size", err.Error())
+			}
+		}(i)
+	}
+
+	err := ng.DeleteNodes(nodesToDelete[0:1])
+	assert.NoError(t, err)
+	manager.AssertExpectations(t)
 }

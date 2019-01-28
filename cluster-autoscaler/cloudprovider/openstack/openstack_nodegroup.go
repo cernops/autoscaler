@@ -107,8 +107,13 @@ func (ng *OpenstackNodeGroup) IncreaseSize(delta int) error {
 //   - after scaling down, blocks until the cluster has reached UPDATE_COMPLETE
 func (ng *OpenstackNodeGroup) DeleteNodes(nodes []*apiv1.Node) error {
 
-	// Attempt at batching simultaneous deletes on individual nodes
+	// Batch simultaneous deletes on individual nodes
 	ng.nodesToDeleteMutex.Lock()
+	// Check that these nodes would not make the batch delete more nodes than the minimum would allow
+	if *ng.targetSize - len(ng.nodesToDelete) - len(nodes) < ng.MinSize() {
+		ng.nodesToDeleteMutex.Unlock()
+		return fmt.Errorf("deleting nodes would take nodegroup below minimum size")
+	}
 	ng.nodesToDelete = append(ng.nodesToDelete, nodes...)
 	ng.nodesToDeleteMutex.Unlock()
 

@@ -1,0 +1,41 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: os-autoscaler
+  namespace: kube-system
+  labels:
+    app: autoscaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: autoscaler
+  template:
+    metadata:
+      namespace: kube-system
+      labels:
+        app: autoscaler
+    spec:
+      serviceAccountName: os-autoscaler-account
+      containers:
+        - name: os-autoscaler
+          image: thartland/os-autoscaler:v1.0
+          imagePullPolicy: Always
+          command:
+            - ./cluster-autoscaler
+            - --alsologtostderr
+            - --cluster-name=scaler-01
+            - --cloud-config=/config/cloud-config
+            - --cloud-provider=openstack
+            - --nodes=1:10:DefaultNodeGroup
+            - --scale-down-unneeded-time=30s
+            - --scale-down-delay-after-add=30s
+            - --scale-down-delay-after-failure=1m
+          volumeMounts:
+            - name: cloud-config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: cloud-config
+          secret:
+            secretName: autoscaler-os-cloud-config

@@ -1,6 +1,6 @@
 # Kubernetes Autoscaler
 
-[![Build Status](https://travis-ci.org/kubernetes/autoscaler.svg?branch=master)](https://travis-ci.org/kubernetes/autoscaler) [![GoDoc Widget]][GoDoc]
+[![CERNops Build Status](https://travis-ci.com/cernops/autoscaler.svg?branch=magnum-autoscaler-release-1.0)](https://travis-ci.com/cernops/autoscaler)
 
 This repository contains autoscaling-related components for Kubernetes.
 

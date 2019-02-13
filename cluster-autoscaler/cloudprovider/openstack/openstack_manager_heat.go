@@ -17,21 +17,25 @@ limitations under the License.
 package openstack
 
 import (
+	"crypto/tls"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
-	"k8s.io/autoscaler/cluster-autoscaler/config"
-	"k8s.io/klog"
-	"time"
-
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
 	"gopkg.in/gcfg.v1"
-	"io"
+	netutil "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
+	"k8s.io/autoscaler/cluster-autoscaler/config"
+	certutil "k8s.io/client-go/util/cert"
+	"k8s.io/klog"
 	provider_os "k8s.io/kubernetes/pkg/cloudprovider/providers/openstack"
-	"strings"
 )
 
 const (
@@ -80,6 +84,17 @@ func CreateOpenstackManagerHeat(configReader io.Reader, discoverOpts cloudprovid
 	provider, err := openstack.NewClient(cfg.Global.AuthURL)
 	if err != nil {
 		return nil, fmt.Errorf("could not authenticate client: %v", err)
+	}
+
+	if cfg.Global.CAFile != "" {
+		roots, err := certutil.NewPool(cfg.Global.CAFile)
+		if err != nil {
+			return nil, err
+		}
+		config := &tls.Config{}
+		config.RootCAs = roots
+		provider.HTTPClient.Transport = netutil.SetOldTransportDefaults(&http.Transport{TLSClientConfig: config})
+
 	}
 
 	err = openstack.AuthenticateV3(provider, authOpts, gophercloud.EndpointOpts{})

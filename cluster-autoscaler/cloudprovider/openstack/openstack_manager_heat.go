@@ -62,6 +62,8 @@ type OpenstackManagerHeat struct {
 
 	stackName string
 	stackID   string
+
+	waitTimeStep time.Duration
 }
 
 // CreateOpenstackManagerHeat sets up cluster and stack clients and returns
@@ -116,6 +118,7 @@ func CreateOpenstackManagerHeat(configReader io.Reader, discoverOpts cloudprovid
 		clusterClient: clusterClient,
 		clusterName:   opts.ClusterName,
 		heatClient:    heatClient,
+		waitTimeStep:  waitForStatusTimeStep,
 	}
 
 	manager.stackID, err = manager.GetStackID()
@@ -229,16 +232,15 @@ func (osm *OpenstackManagerHeat) GetStackStatus() (string, error) {
 // Returns when the status is observed or the timeout is reached.
 func (osm *OpenstackManagerHeat) WaitForStackStatus(status string, timeout time.Duration) error {
 	klog.V(2).Infof("Waiting for stack %s status", status)
-	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
+	for start := time.Now(); time.Since(start) < timeout; time.Sleep(osm.waitTimeStep) {
 		currentStatus, err := osm.GetStackStatus()
 		if err != nil {
 			return fmt.Errorf("error waiting for stack status: %v", err)
 		}
 		if currentStatus == status {
-			klog.V(0).Infof("Waited for stack %s status, took %d seconds", status, int(time.Since(start).Seconds()))
+			klog.V(0).Infof("Waited for stack %s status", status)
 			return nil
 		}
-		time.Sleep(time.Second)
 	}
 	return fmt.Errorf("timeout (%v) waiting for stack status %s", timeout, status)
 }

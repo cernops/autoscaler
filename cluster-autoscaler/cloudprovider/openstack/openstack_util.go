@@ -30,7 +30,8 @@ const (
 	clusterStatusUpdateComplete   = "UPDATE_COMPLETE"
 	clusterStatusUpdateFailed     = "UPDATE_FAILED"
 
-	waitForUpdateStatusTimeout  = 30 * time.Second
+	waitForStatusTimeStep       = 30 * time.Second
+	waitForUpdateStatusTimeout  = 2 * time.Minute
 	waitForCompleteStatusTimout = 10 * time.Minute
 
 	// Could move to property of OpenstackManager implementations if needed

@@ -164,6 +164,7 @@ func BuildOpenstack(opts config.AutoscalingOptions, do cloudprovider.NodeGroupDi
 			minSize:            spec.MinSize,
 			maxSize:            spec.MaxSize,
 			targetSize:         new(int),
+			waitTimeStep:       waitForStatusTimeStep,
 		}
 		*ng.targetSize, err = ng.openstackManager.NodeGroupSize(ng.id)
 		if err != nil {

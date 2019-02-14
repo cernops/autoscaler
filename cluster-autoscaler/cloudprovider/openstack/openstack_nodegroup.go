@@ -44,23 +44,25 @@ type OpenstackNodeGroup struct {
 
 	nodesToDelete      []*apiv1.Node
 	nodesToDeleteMutex sync.Mutex
+
+	waitTimeStep time.Duration
 }
 
 // WaitForClusterStatus checks once per second to see if the cluster has entered a given status.
 // Returns when the status is observed or the timeout is reached.
 func (ng *OpenstackNodeGroup) WaitForClusterStatus(status string, timeout time.Duration) error {
 	klog.V(2).Infof("Waiting for cluster %s status", status)
-	for start := time.Now(); time.Since(start) < timeout; time.Sleep(time.Second) {
+	for start := time.Now(); time.Since(start) < timeout; time.Sleep(ng.waitTimeStep) {
 		clusterStatus, err := ng.openstackManager.GetClusterStatus()
 		if err != nil {
 			return fmt.Errorf("error waiting for %s status: %v", status, err)
 		}
 		if clusterStatus == status {
-			klog.V(0).Infof("Waited for cluster %s status, took %d seconds", status, int(time.Since(start).Seconds()))
+			klog.V(0).Infof("Waited for cluster %s status", status)
 			return nil
 		}
 	}
-	return fmt.Errorf("timeout waiting for %s status", status)
+	return fmt.Errorf("timeout (%v) waiting for %s status", timeout, status)
 }
 
 // IncreaseSize increases the number of nodes by replacing the cluster's node_count.

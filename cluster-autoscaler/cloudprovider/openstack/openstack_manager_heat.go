@@ -144,7 +144,7 @@ func (osm *OpenstackManagerHeat) NodeGroupSize(nodegroup string) (int, error) {
 // UpdateNodeCount replaces the cluster node_count in magnum.
 func (osm *OpenstackManagerHeat) UpdateNodeCount(nodegroup string, nodes int) error {
 	updateOpts := []clusters.UpdateOptsBuilder{
-		clusters.UpdateOpts{Op: clusters.ReplaceOp, Path: "/node_count", Value: fmt.Sprintf("%d", nodes)},
+		UpdateOptsInt{Op: clusters.ReplaceOp, Path: "/node_count", Value: nodes},
 	}
 	_, err := clusters.Update(osm.clusterClient, osm.clusterName, updateOpts).Extract()
 	if err != nil {
@@ -277,4 +277,21 @@ func (osm *OpenstackManagerHeat) GetStackName() (string, error) {
 	}
 
 	return "", fmt.Errorf("stack with ID %s not found", osm.stackID)
+}
+
+// UpdateOptsInt has a value of type int rather than string.
+//
+// A Magnum API running with python2 accepts a string for
+// replacing node_count, but with python3 only an integer type
+// is accepted.
+type UpdateOptsInt struct {
+	Op    clusters.UpdateOp `json:"op" required:"true"`
+	Path  string            `json:"path" required:"true"`
+	Value int               `json:"value,omitempty"`
+}
+
+// ToClustersUpdateMap assembles a request body based on the contents of
+// UpdateOpts.
+func (opts UpdateOptsInt) ToClustersUpdateMap() (map[string]interface{}, error) {
+	return gophercloud.BuildRequestBody(opts, "")
 }

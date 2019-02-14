@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"testing"
+	"time"
 )
 
 var clusterUUID = "732851e1-f792-4194-b966-4cbfa5f30093"
@@ -237,6 +238,7 @@ func CreateTestOpenstackManagerHeat(client *gophercloud.ServiceClient) *Openstac
 	return &OpenstackManagerHeat{
 		clusterClient: client,
 		heatClient:    client,
+		waitTimeStep:  100 * time.Millisecond,
 	}
 }
 
@@ -585,4 +587,78 @@ func TestDeleteNodesStackPatchFail(t *testing.T) {
 		th.Server.URL, stackName, stackID, stackBadPatchResponse)
 
 	assert.Equal(t, expectedErrString, err.Error())
+}
+
+func TestWaitForStackStatusSuccess(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	GETRequestCount := 0
+
+	th.Mux.HandleFunc("/v1/stacks/", func(w http.ResponseWriter, r *http.Request) {
+		if GETRequestCount == 0 {
+			GETRequestCount += 1
+			w.Header().Add("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, stackGetResponse, stackName, stackStatusUpdateInProgress, stackID)
+		} else {
+			w.Header().Add("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, stackGetResponseSuccess)
+		}
+	})
+
+	sc := CreateTestServiceClient()
+
+	osm := CreateTestOpenstackManagerHeat(sc)
+	osm.clusterName = clusterUUID
+	osm.stackID = stackID
+	osm.stackName = stackName
+
+	err := osm.WaitForStackStatus(stackStatusUpdateComplete, 200*time.Millisecond)
+	assert.NoError(t, err)
+}
+
+func TestWaitForStackStatusTimeout(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	th.Mux.HandleFunc("/v1/stacks/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, stackGetResponse, stackName, stackStatusUpdateInProgress, stackID)
+	})
+
+	sc := CreateTestServiceClient()
+
+	osm := CreateTestOpenstackManagerHeat(sc)
+	osm.clusterName = clusterUUID
+	osm.stackID = stackID
+	osm.stackName = stackName
+
+	err := osm.WaitForStackStatus(stackStatusUpdateComplete, 200*time.Millisecond)
+	assert.Error(t, err)
+	assert.Equal(t, "timeout (200ms) waiting for stack status UPDATE_COMPLETE", err.Error())
+}
+
+func TestWaitForStackStatusError(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	th.Mux.HandleFunc("/v1/stacks/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, stackGetResponseNotFound)
+	})
+
+	sc := CreateTestServiceClient()
+
+	osm := CreateTestOpenstackManagerHeat(sc)
+	osm.clusterName = clusterUUID
+	osm.stackID = stackID
+	osm.stackName = stackName
+
+	err := osm.WaitForStackStatus(stackStatusUpdateComplete, 200*time.Millisecond)
+	assert.Error(t, err)
+	assert.Equal(t, "error waiting for stack status: could not get stack from heat: Resource not found", err.Error())
 }

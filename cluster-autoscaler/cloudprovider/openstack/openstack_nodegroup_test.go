@@ -72,6 +72,7 @@ func CreateTestNodeGroup(manager OpenstackManager) *OpenstackNodeGroup {
 		minSize:            1,
 		maxSize:            10,
 		targetSize:         &current,
+		waitTimeStep:       100 * time.Millisecond,
 	}
 	return &ng
 }
@@ -82,18 +83,18 @@ func TestWaitForClusterStatus(t *testing.T) {
 
 	// Test all working normally
 	manager.On("GetClusterStatus").Return(clusterStatusUpdateComplete, nil).Once()
-	err := ng.WaitForClusterStatus(clusterStatusUpdateComplete, 2*time.Second)
+	err := ng.WaitForClusterStatus(clusterStatusUpdateComplete, 200*time.Millisecond)
 	assert.NoError(t, err)
 
 	// Test timeout
 	manager.On("GetClusterStatus").Return(clusterStatusUpdateInProgress, nil).Times(2)
-	err = ng.WaitForClusterStatus(clusterStatusUpdateComplete, 2*time.Second)
+	err = ng.WaitForClusterStatus(clusterStatusUpdateComplete, 200*time.Millisecond)
 	assert.Error(t, err)
-	assert.Equal(t, "timeout waiting for UPDATE_COMPLETE status", err.Error())
+	assert.Equal(t, "timeout (200ms) waiting for UPDATE_COMPLETE status", err.Error())
 
 	// Test error returned from manager
 	manager.On("GetClusterStatus").Return("", errors.New("manager error")).Once()
-	err = ng.WaitForClusterStatus(clusterStatusUpdateComplete, 2*time.Second)
+	err = ng.WaitForClusterStatus(clusterStatusUpdateComplete, 200*time.Millisecond)
 	assert.Error(t, err)
 	assert.Equal(t, "error waiting for UPDATE_COMPLETE status: manager error", err.Error())
 }
